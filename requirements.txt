@@ -1,0 +1,7 @@
+psycopg2-binary
+pandas
+openpyxl
+requests
+beautifulsoup4
+lxml
+PySide6
