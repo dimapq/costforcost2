@@ -23,7 +23,9 @@ Page {
 
         // ================= ВКЛАДКА 1: В ПРОЦЕССЕ =================
         Item {
+            id: tab1Root
             property int selectedInProgressId: -1
+            property int selectedRow: -1
 
             InProgressModel { id: inProgressModel }
 
@@ -78,20 +80,29 @@ Page {
                         if (column === 2) return 150
                         return 150
                     }
+                    
                     delegate: Rectangle {
-                        implicitHeight: 30
+                        implicitHeight: 35
                         border.color: "#ddd"
-                        color: row % 2 ? "#f9f9f9" : "white"
+                        color: {
+                            if (tab1Root.selectedRow === row) return "#b3d9ff"
+                            return row % 2 ? "#f9f9f9" : "white"
+                        }
+                        
                         Text {
                             anchors.centerIn: parent
                             text: display
                             font.pixelSize: 14
+                            color: "black"
                         }
-                    }
-                    onCurrentRowChanged: {
-                        if (currentRow >= 0) {
-                            var item = inProgressModel.get(currentRow)
-                            selectedInProgressId = item.id
+                        
+                        MouseArea {
+                            anchors.fill: parent
+                            onClicked: {
+                                tab1Root.selectedRow = row
+                                var item = inProgressModel.get(row)
+                                tab1Root.selectedInProgressId = item.id
+                            }
                         }
                     }
                 }
@@ -100,7 +111,8 @@ Page {
                     Layout.fillWidth: true
                     Button {
                         text: "Завершить производство"
-                        enabled: selectedInProgressId > 0
+                        enabled: tab1Root.selectedInProgressId > 0
+                        highlighted: tab1Root.selectedInProgressId > 0
                         onClicked: completeDialog.open()
                     }
                 }
@@ -119,7 +131,9 @@ Page {
                     TextField { id: invNumberField; Layout.fillWidth: true }
                 }
                 onAccepted: {
-                    backend.completeMachine(selectedInProgressId, invNumberField.text)
+                    backend.completeMachine(tab1Root.selectedInProgressId, invNumberField.text)
+                    tab1Root.selectedRow = -1
+                    tab1Root.selectedInProgressId = -1
                     inProgressModel.refresh()
                     invNumberField.clear()
                 }
@@ -130,145 +144,398 @@ Page {
 
         // ================= ВКЛАДКА 2: ГОТОВЫЕ =================
         Item {
+            id: tab2Root
             property int selectedFinishedId: -1
+            property int selectedRow: -1
 
             FinishedGoodsModel { id: finishedModel }
 
-            ColumnLayout {
-                anchors.fill: parent
-                anchors.margins: 10
-                spacing: 10
+            TabBar {
+                id: finishedTabBar
+                width: parent.width
+                TabButton { text: "На складе" }
+                TabButton { text: "Проданные" }
+            }
 
-                RowLayout {
-                    Layout.fillWidth: true
-                    TextField {
-                        id: finishedSearchField
-                        Layout.fillWidth: true
-                        placeholderText: "Поиск..."
-                        onTextChanged: finishedModel.setFilter(text)
-                    }
-                    Button {
-                        text: "Обновить"
-                        onClicked: {
-                            finishedSearchField.clear()
-                            finishedModel.setFilter("")
-                            finishedModel.refresh()
-                        }
-                    }
-                }
+            StackLayout {
+                anchors.top: finishedTabBar.bottom
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                currentIndex: finishedTabBar.currentIndex
 
-                // Заголовок таблицы
-                Rectangle {
-                    Layout.fillWidth: true
-                    height: 30
-                    color: "#e8e8e8"
-                    RowLayout {
+                // ========== ПОДВКЛАДКА: НА СКЛАДЕ ==========
+                Item {
+                    ColumnLayout {
                         anchors.fill: parent
-                        spacing: 0
-                        Repeater {
-                            model: ["ID", "Модель", "Инв. №", "Дата", "Покупатель", "Цена"]
-                            Rectangle {
-                                width: index === 0 ? 50 : index === 1 ? 150 : 100
-                                height: 30
-                                border.color: "#ccc"
-                                color: "transparent"
+                        anchors.margins: 10
+                        spacing: 10
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            TextField {
+                                id: inStockSearchField
+                                Layout.fillWidth: true
+                                placeholderText: "Поиск..."
+                                onTextChanged: finishedModel.setFilter(text)
+                            }
+                            Button {
+                                text: "Обновить"
+                                onClicked: {
+                                    inStockSearchField.clear()
+                                    finishedModel.setFilter("")
+                                    finishedModel.refresh()
+                                    tab2Root.selectedRow = -1
+                                    tab2Root.selectedFinishedId = -1
+                                }
+                            }
+                        }
+
+                        // Заголовок таблицы
+                        Rectangle {
+                            Layout.fillWidth: true
+                            height: 30
+                            color: "#e8e8e8"
+                            RowLayout {
+                                anchors.fill: parent
+                                spacing: 0
+                                Repeater {
+                                    model: ["ID", "Модель", "Инв. №", "Дата производства", "Себестоимость"]
+                                    Rectangle {
+                                        width: index === 0 ? 50 : index === 1 ? 200 : index === 2 ? 120 : index === 3 ? 150 : 120
+                                        height: 30
+                                        border.color: "#ccc"
+                                        color: "transparent"
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: modelData
+                                            font.pixelSize: 13
+                                            font.bold: true
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        TableView {
+                            id: inStockTable
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            model: finishedModel
+                            clip: true
+                            columnWidthProvider: function(column) {
+                                if (column === 0) return 50
+                                if (column === 1) return 200
+                                if (column === 2) return 120
+                                if (column === 3) return 150
+                                return 120
+                            }
+
+                            delegate: Rectangle {
+                                implicitHeight: 35
+                                border.color: "#ddd"
+                                visible: display !== "" // Показываем только строки со статусом 'completed'
+                                color: {
+                                    if (tab2Root.selectedRow === row) return "#b3d9ff"
+                                    return row % 2 ? "#f9f9f9" : "white"
+                                }
+
                                 Text {
                                     anchors.centerIn: parent
-                                    text: modelData
-                                    font.pixelSize: 13
-                                    font.bold: true
+                                    text: display
+                                    font.pixelSize: 14
+                                    color: "black"
                                 }
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    onClicked: {
+                                        tab2Root.selectedRow = row
+                                        var fg = finishedModel.get(row)
+                                        tab2Root.selectedFinishedId = fg.id
+                                    }
+                                }
+                            }
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 5
+                            Button {
+                                text: "Продать"
+                                enabled: tab2Root.selectedFinishedId > 0
+                                highlighted: tab2Root.selectedFinishedId > 0
+                                onClicked: sellDialog.open()
+                            }
+                            Button {
+                                text: "Детали себестоимости"
+                                enabled: tab2Root.selectedFinishedId > 0
+                                onClicked: costDetailsDialog.open()
                             }
                         }
                     }
                 }
 
-                TableView {
-                    id: finishedTable
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    model: finishedModel
-                    clip: true
-                    columnWidthProvider: function(column) {
-                        if (column === 0) return 50
-                        if (column === 1) return 150
-                        if (column === 2) return 100
-                        if (column === 3) return 100
-                        if (column === 4) return 100
-                        return 100
-                    }
-                    delegate: Rectangle {
-                        implicitHeight: 30
-                        border.color: "#ddd"
-                        color: row % 2 ? "#f9f9f9" : "white"
-                        Text {
-                            anchors.centerIn: parent
-                            text: display
-                            font.pixelSize: 14
-                        }
-                    }
-                    onCurrentRowChanged: {
-                        if (currentRow >= 0) {
-                            var fg = finishedModel.get(currentRow)
-                            selectedFinishedId = fg.id
-                        }
-                    }
-                }
+                // ========== ПОДВКЛАДКА: ПРОДАННЫЕ ==========
+                Item {
+                    ColumnLayout {
+                        anchors.fill: parent
+                        anchors.margins: 10
+                        spacing: 10
 
-                RowLayout {
-                    Layout.fillWidth: true
-                    Button {
-                        text: "Продать"
-                        enabled: selectedFinishedId > 0
-                        onClicked: sellDialog.open()
+                        RowLayout {
+                            Layout.fillWidth: true
+                            TextField {
+                                id: soldSearchField
+                                Layout.fillWidth: true
+                                placeholderText: "Поиск..."
+                            }
+                            Button {
+                                text: "Обновить"
+                                onClicked: {
+                                    soldSearchField.clear()
+                                    finishedModel.refresh()
+                                }
+                            }
+                        }
+
+                        // Заголовок таблицы
+                        Rectangle {
+                            Layout.fillWidth: true
+                            height: 30
+                            color: "#e8e8e8"
+                            RowLayout {
+                                anchors.fill: parent
+                                spacing: 0
+                                Repeater {
+                                    model: ["ID", "Модель", "Инв. №", "Дата продажи", "Покупатель", "Цена продажи", "Прибыль"]
+                                    Rectangle {
+                                        width: index === 0 ? 50 : index === 1 ? 150 : index === 2 ? 100 : index === 3 ? 120 : index === 4 ? 150 : index === 5 ? 120 : 100
+                                        height: 30
+                                        border.color: "#ccc"
+                                        color: "transparent"
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: modelData
+                                            font.pixelSize: 13
+                                            font.bold: true
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        ScrollView {
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            clip: true
+
+                            ListView {
+                                id: soldListView
+                                model: ListModel { id: soldListModel }
+                                spacing: 0
+
+                                delegate: Rectangle {
+                                    width: soldListView.width
+                                    height: 35
+                                    border.color: "#ddd"
+                                    color: index % 2 ? "#f9f9f9" : "white"
+
+                                    RowLayout {
+                                        anchors.fill: parent
+                                        spacing: 0
+                                        Text {
+                                            Layout.preferredWidth: 50
+                                            text: model.id
+                                            horizontalAlignment: Text.AlignHCenter
+                                            verticalAlignment: Text.AlignVCenter
+                                            font.pixelSize: 14
+                                        }
+                                        Text {
+                                            Layout.preferredWidth: 150
+                                            text: model.machine_model
+                                            horizontalAlignment: Text.AlignHCenter
+                                            verticalAlignment: Text.AlignVCenter
+                                            font.pixelSize: 14
+                                        }
+                                        Text {
+                                            Layout.preferredWidth: 100
+                                            text: model.inv_num || "—"
+                                            horizontalAlignment: Text.AlignHCenter
+                                            verticalAlignment: Text.AlignVCenter
+                                            font.pixelSize: 14
+                                        }
+                                        Text {
+                                            Layout.preferredWidth: 120
+                                            text: model.sale_date || "—"
+                                            horizontalAlignment: Text.AlignHCenter
+                                            verticalAlignment: Text.AlignVCenter
+                                            font.pixelSize: 14
+                                        }
+                                        Text {
+                                            Layout.preferredWidth: 150
+                                            text: model.buyer || "—"
+                                            horizontalAlignment: Text.AlignHCenter
+                                            verticalAlignment: Text.AlignVCenter
+                                            font.pixelSize: 14
+                                        }
+                                        Text {
+                                            Layout.preferredWidth: 120
+                                            text: model.sale_price ? model.sale_price.toFixed(2) + " ₽" : "—"
+                                            horizontalAlignment: Text.AlignHCenter
+                                            verticalAlignment: Text.AlignVCenter
+                                            font.pixelSize: 14
+                                        }
+                                        Text {
+                                            Layout.preferredWidth: 100
+                                            text: model.profit ? model.profit.toFixed(2) + " ₽" : "—"
+                                            horizontalAlignment: Text.AlignHCenter
+                                            verticalAlignment: Text.AlignVCenter
+                                            font.pixelSize: 14
+                                            color: model.profit > 0 ? "#28a745" : "#dc3545"
+                                        }
+                                    }
+                                }
+
+                                Component.onCompleted: loadSoldMachines()
+
+                                function loadSoldMachines() {
+                                    soldListModel.clear()
+                                    var sold = backend.getSoldMachinesList()
+                                    for (var i = 0; i < sold.length; i++) {
+                                        soldListModel.append(sold[i])
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
 
-            // ДИАЛОГ ВНУТРИ ITEM
+            // ========== ДИАЛОГИ ==========
             Dialog {
                 id: sellDialog
                 title: "Продажа станка"
                 standardButtons: Dialog.Ok | Dialog.Cancel
-                width: 400
-                height: 250
+                width: 500
+                height: 400
+
                 ColumnLayout {
                     anchors.fill: parent
+                    spacing: 10
+
+                    Label {
+                        text: "Инвентарный номер:"
+                    }
+                    TextField {
+                        id: sellInvNumberField
+                        Layout.fillWidth: true
+                        placeholderText: "Введите или оставьте пустым"
+                    }
+
+                    Label { text: "Дата продажи:" }
+                    TextField {
+                        id: sellDateField
+                        Layout.fillWidth: true
+                        placeholderText: "ГГГГ-ММ-ДД (Enter = сегодня)"
+                        text: Qt.formatDate(new Date(), "yyyy-MM-dd")
+                    }
+
+                    Label { text: "Покупатель:" }
+                    TextField {
+                        id: buyerField
+                        Layout.fillWidth: true
+                        placeholderText: "ФИО или название организации"
+                    }
+
                     Label { text: "Цена продажи (руб):" }
                     TextField {
                         id: sellPriceField
                         Layout.fillWidth: true
                         validator: DoubleValidator { bottom: 0.01 }
+                        placeholderText: "Введите цену"
                     }
-                    Label { text: "Покупатель:" }
-                    TextField { id: buyerField; Layout.fillWidth: true }
 
                     Label {
                         id: sellErrorLabel
                         color: "red"
                         visible: false
-                        text: "Заполните все поля"
+                        text: "Заполните покупателя и цену"
                     }
                 }
+
+                onOpened: {
+                    sellInvNumberField.clear()
+                    sellDateField.text = Qt.formatDate(new Date(), "yyyy-MM-dd")
+                    buyerField.clear()
+                    sellPriceField.clear()
+                    sellErrorLabel.visible = false
+                }
+
                 onAccepted: {
                     if (sellPriceField.text && buyerField.text) {
                         sellErrorLabel.visible = false
-                        backend.sellFinishedGood(selectedFinishedId, parseFloat(sellPriceField.text), buyerField.text)
-                        finishedModel.refresh()
-                        sellPriceField.clear()
-                        buyerField.clear()
+                        if (backend.sellFinishedGoodExtended(
+                            tab2Root.selectedFinishedId,
+                            parseFloat(sellPriceField.text),
+                            buyerField.text,
+                            sellInvNumberField.text,
+                            sellDateField.text
+                        )) {
+                            tab2Root.selectedRow = -1
+                            tab2Root.selectedFinishedId = -1
+                            finishedModel.refresh()
+                        }
                     } else {
                         sellErrorLabel.visible = true
                     }
                 }
-                onClosed: {
-                    sellErrorLabel.visible = false
-                    sellPriceField.clear()
-                    buyerField.clear()
+            }
+
+            Dialog {
+                id: costDetailsDialog
+                title: "Детали себестоимости станка"
+                standardButtons: Dialog.Close
+                width: 600
+                height: 500
+
+                ColumnLayout {
+                    anchors.fill: parent
+                    spacing: 10
+
+                    Label {
+                        id: costDetailsHeader
+                        text: "Загрузка..."
+                        font.bold: true
+                        font.pixelSize: 14
+                    }
+
+                    ScrollView {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        clip: true
+
+                        TextArea {
+                            id: costDetailsText
+                            readOnly: true
+                            wrapMode: TextArea.Wrap
+                            font.family: "Courier New"
+                            font.pixelSize: 12
+                            text: "Загрузка данных..."
+                        }
+                    }
+                }
+
+                onOpened: {
+                    var details = backend.getMachineCostDetails(tab2Root.selectedFinishedId)
+                    costDetailsHeader.text = details.header
+                    costDetailsText.text = details.breakdown
                 }
             }
 
-            Component.onCompleted: finishedModel.refresh()
+            Component.onCompleted: {
+                finishedModel.refresh()
+            }
         }
        // ================= ВКЛАДКА 3: РЕДАКТОР МОДЕЛЕЙ =================
         Item {

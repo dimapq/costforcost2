@@ -74,7 +74,6 @@ class MaterialTableModel(QAbstractTableModel):
                 ]
         self.endResetModel()
 
-
 class ToolsTableModel(QAbstractTableModel):
     def __init__(self):
         super().__init__()
@@ -134,7 +133,6 @@ class ToolsTableModel(QAbstractTableModel):
                 ]
         self.endResetModel()
 
-
 class EmployeeTableModel(QAbstractTableModel):
     def __init__(self):
         super().__init__()
@@ -189,7 +187,6 @@ class EmployeeTableModel(QAbstractTableModel):
                     for r in rows
                 ]
         self.endResetModel()
-
 
 class MachineListModel(QAbstractListModel):
     IdRole = Qt.UserRole + 1
@@ -266,7 +263,6 @@ class MachineListModel(QAbstractListModel):
         else:
             self._data = list(self._all_data)
         self.endResetModel()
-
 
 class MachineSpecModel(QAbstractTableModel):
     def __init__(self):
@@ -359,7 +355,6 @@ class MachineSpecModel(QAbstractTableModel):
                 ]
         self.endResetModel()
 
-
 class InProgressModel(QAbstractTableModel):
     def __init__(self):
         super().__init__()
@@ -412,7 +407,6 @@ class InProgressModel(QAbstractTableModel):
                     for r in rows
                 ]
         self.endResetModel()
-
 
 class FinishedGoodsModel(QAbstractTableModel):
     def __init__(self):
@@ -478,9 +472,9 @@ class FinishedGoodsModel(QAbstractTableModel):
             with conn.cursor() as cur:
                 cur.execute("""
                     SELECT id, machine_model, cost_price, produced_date, status,
-                           inventory_number, buyer, sale_date
+                        inventory_number, buyer, sale_date
                     FROM finished_goods
-                    WHERE status IN ('completed', 'in_stock', 'sold')
+                    WHERE status = 'completed'  -- Только на складе
                     ORDER BY produced_date DESC
                 """)
                 rows = cur.fetchall()
@@ -497,7 +491,7 @@ class FinishedGoodsModel(QAbstractTableModel):
                     }
                     for r in rows
                 ]
-        # Переприменяем текущий фильтр после обновления данных
+        # Переприменяем фильтр
         if self._filter:
             self._data = [
                 item for item in self._all_data
