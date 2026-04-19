@@ -272,7 +272,7 @@ class MachineSpecModel(QAbstractTableModel):
     def __init__(self):
         super().__init__()
         self._data = []
-        self._headers = ["ID", "Материал", "Кол-во", "Цена за ед."]
+        self._headers = ["ID", "Материал", "Кол-во", "Цена/ед", "Сумма"]
         self._machine_id = None
 
     @Slot(int)
@@ -281,10 +281,7 @@ class MachineSpecModel(QAbstractTableModel):
 
     def rowCount(self, parent=QModelIndex()):
         return len(self._data)
-
-    def columnCount(self, parent=QModelIndex()):
-        return len(self._headers)
-
+    
     def data(self, index, role=Qt.DisplayRole):
         if not index.isValid():
             return None
@@ -295,7 +292,16 @@ class MachineSpecModel(QAbstractTableModel):
             if col == 1: return row['name']
             if col == 2: return f"{row['quantity']:.2f}"
             if col == 3: return f"{row['price']:.2f}" if row['price'] else "—"
+            if col == 4:
+                # Колонка "Сумма" = количество × цена
+                if row['price']:
+                    total = row['quantity'] * row['price']
+                    return f"{total:.2f}"
+                return "—"
         return None
+
+    def columnCount(self, parent=QModelIndex()):
+        return len(self._headers)
 
     def headerData(self, section, orientation, role=Qt.DisplayRole):
         if orientation == Qt.Horizontal and role == Qt.DisplayRole:
@@ -312,6 +318,13 @@ class MachineSpecModel(QAbstractTableModel):
     def getQuantity(self, row):
         if 0 <= row < len(self._data):
             return self._data[row]['quantity']
+        return 0.0
+
+    @Slot(int, result=float)
+    def getPrice(self, row):
+        if 0 <= row < len(self._data):
+            price = self._data[row]['price']
+            return float(price) if price is not None else 0.0
         return 0.0
 
     @Slot()

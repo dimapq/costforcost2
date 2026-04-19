@@ -392,6 +392,7 @@ Page {
                         font.bold: true
                     }
 
+                    // Заголовок таблицы спецификации
                     Rectangle {
                         Layout.fillWidth: true
                         height: 30
@@ -401,9 +402,9 @@ Page {
                             anchors.fill: parent
                             spacing: 0
                             Repeater {
-                                model: ["ID", "Материал", "Кол-во", "Цена/ед"]
+                                model: ["ID", "Материал", "Кол-во", "Цена/ед", "Сумма"]
                                 Rectangle {
-                                    width: index === 0 ? 50 : index === 1 ? 300 : index === 2 ? 80 : 100
+                                    width: index === 0 ? 50 : index === 1 ? 250 : index === 2 ? 80 : index === 3 ? 100 : 100
                                     height: 30
                                     border.color: "#ccc"
                                     color: "transparent"
@@ -427,18 +428,84 @@ Page {
                         visible: tab3Root.selectedMachineId > 0
                         columnWidthProvider: function(column) {
                             if (column === 0) return 50
-                            if (column === 1) return 300
+                            if (column === 1) return 250
                             if (column === 2) return 80
+                            if (column === 3) return 100
                             return 100
                         }
+                        selectionBehavior: TableView.SelectRows
+                        
                         delegate: Rectangle {
-                            implicitHeight: 30
+                            implicitHeight: 35
                             border.color: "#ddd"
-                            color: row % 2 ? "#f9f9f9" : "white"
+                            color: {
+                                if (specTable.currentRow === row) return "#b3d9ff"
+                                return row % 2 ? "#f9f9f9" : "white"
+                            }
+                            
                             Text {
                                 anchors.centerIn: parent
                                 text: display
                                 font.pixelSize: 14
+                                color: "black"
+                            }
+                            
+                            MouseArea {
+                                anchors.fill: parent
+                                onClicked: {
+                                    specTable.currentRow = row
+                                    specTable.forceActiveFocus()
+                                }
+                            }
+                        }
+                    }
+
+                    // ИТОГОВАЯ СУММА
+                    Rectangle {
+                        Layout.fillWidth: true
+                        height: 35
+                        color: "#fff9e6"
+                        border.color: "#ccc"
+                        visible: tab3Root.selectedMachineId > 0 && specModel.rowCount() > 0
+                        
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.margins: 5
+                            
+                            Label {
+                                text: "ИТОГО:"
+                                font.bold: true
+                                font.pixelSize: 14
+                                Layout.fillWidth: true
+                            }
+                            
+                            Label {
+                                id: totalCostLabel
+                                text: calculateTotalCost() + " ₽"
+                                font.bold: true
+                                font.pixelSize: 14
+                                color: "#2c5aa0"
+                                horizontalAlignment: Text.AlignRight
+                                Layout.preferredWidth: 100
+                                
+                                function calculateTotalCost() {
+                                    var total = 0.0
+                                    for (var i = 0; i < specModel.rowCount(); i++) {
+                                        var qty = specModel.getQuantity(i)
+                                        var price = specModel.getPrice(i)
+                                        if (price !== null && price > 0) {
+                                            total += qty * price
+                                        }
+                                    }
+                                    return total.toFixed(2)
+                                }
+                                
+                                Connections {
+                                    target: specModel
+                                    function onModelReset() {
+                                        totalCostLabel.text = totalCostLabel.calculateTotalCost() + " ₽"
+                                    }
+                                }
                             }
                         }
                     }
@@ -452,27 +519,17 @@ Page {
                     RowLayout {
                         Layout.fillWidth: true
                         visible: tab3Root.selectedMachineId > 0
+                        spacing: 5
+                        
                         Button {
                             text: "Добавить материал"
                             onClicked: addMaterialToSpecDialog.open()
                         }
-                        Button {
-                            text: "Удалить материал"
-                            enabled: specTable.currentRow >= 0
-                            onClicked: {
-                                var row = specTable.currentRow
-                                var matId = specModel.getMaterialId(row)
-                                if (matId > 0) {
-                                    backend.removeMaterialFromMachine(tab3Root.selectedMachineId, matId)
-                                    specModel.refresh()
-                                    machineModel.refresh()
-                                    modelCountText.text = "Найдено моделей: " + machineModel.rowCount()
-                                }
-                            }
-                        }
+                        
                         Button {
                             text: "Изменить количество"
                             enabled: specTable.currentRow >= 0
+                            highlighted: specTable.currentRow >= 0
                             onClicked: {
                                 var row = specTable.currentRow
                                 var matId = specModel.getMaterialId(row)
@@ -480,6 +537,23 @@ Page {
                                 editQtyDialog.materialId = matId
                                 editQtyDialog.currentQty = curQty
                                 editQtyDialog.open()
+                            }
+                        }
+                        
+                        Button {
+                            text: "Удалить материал"
+                            enabled: specTable.currentRow >= 0
+                            highlighted: specTable.currentRow >= 0
+                            onClicked: {
+                                var row = specTable.currentRow
+                                var matId = specModel.getMaterialId(row)
+                                if (matId > 0) {
+                                    backend.removeMaterialFromMachine(tab3Root.selectedMachineId, matId)
+                                    specTable.currentRow = -1
+                                    specModel.refresh()
+                                    machineModel.refresh()
+                                    modelCountText.text = "Найдено моделей: " + machineModel.rowCount()
+                                }
                             }
                         }
                     }

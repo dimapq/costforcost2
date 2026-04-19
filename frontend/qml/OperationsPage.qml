@@ -10,70 +10,126 @@ Page {
         anchors.margins: 20
         spacing: 20
 
-        // --- Блок учёта рабочего времени ---
+        // ================= Учёт рабочего времени =================
         GroupBox {
-            title: "Учёт рабочего времени"
             Layout.fillWidth: true
-            Layout.preferredHeight: 200
+            title: "Учёт рабочего времени"
 
-            GridLayout {
+            ColumnLayout {
                 anchors.fill: parent
-                columns: 2
-                rowSpacing: 10
-                columnSpacing: 15
+                spacing: 10
 
-                Label { text: "Работник:" }
-                ComboBox {
-                    id: employeeCombo
-                    Layout.fillWidth: true
-                    model: backend.getEmployeesList()
-                    textRole: "name"
-                    valueRole: "id"
+                Label {
+                    text: "Добавить часы работы к активному станку"
+                    font.bold: true
                 }
 
-                Label { text: "Готовый станок:" }
-                ComboBox {
-                    id: finishedGoodCombo
+                // Выбор активного станка
+                RowLayout {
                     Layout.fillWidth: true
-                    model: backend.getFinishedGoodsList()
-                    textRole: "display"
-                    valueRole: "id"
-                }
-
-                Label { text: "Часы:" }
-                TextField {
-                    id: hoursInput
-                    Layout.fillWidth: true
-                    placeholderText: "Количество часов"
-                    validator: DoubleValidator { bottom: 0.1; decimals: 2 }
-                }
-
-                Label { text: "Примечание:" }
-                TextField {
-                    id: notesInput
-                    Layout.fillWidth: true
-                    placeholderText: "Необязательно"
-                }
-
-                Item { Layout.fillWidth: true }
-
-                Button {
-                    text: "Записать время"
-                    onClicked: {
-                        if (employeeCombo.currentValue && finishedGoodCombo.currentValue && hoursInput.text) {
-                            var result = backend.logWorkHours(
-                                employeeCombo.currentValue,
-                                finishedGoodCombo.currentValue,
-                                parseFloat(hoursInput.text),
-                                notesInput.text
-                            );
-                            if (result) {
-                                hoursInput.clear();
-                                notesInput.clear();
-                                summaryTimer.start();
+                    Label { text: "Станок в производстве:" }
+                    ComboBox {
+                        id: inProgressMachineCombo
+                        Layout.fillWidth: true
+                        model: ListModel { id: inProgressMachineList }
+                        textRole: "display"
+                        valueRole: "id"
+                        
+                        Component.onCompleted: refreshInProgressList()
+                        
+                        function refreshInProgressList() {
+                            inProgressMachineList.clear()
+                            var machines = backend.getInProgressMachinesList()
+                            for (var i = 0; i < machines.length; i++) {
+                                inProgressMachineList.append(machines[i])
                             }
                         }
                     }
+                    Button {
+                        text: "Обновить список"
+                        onClicked: inProgressMachineCombo.refreshInProgressList()
+                    }
+                }
+
+                // Выбор работника
+                RowLayout {
+                    Layout.fillWidth: true
+                    Label { text: "Работник:" }
+                    ComboBox {
+                        id: employeeComboWorkLog
+                        Layout.fillWidth: true
+                        model: backend.getEmployeesList()
+                        textRole: "name"
+                        valueRole: "id"
+                    }
+                }
+
+                // Количество часов
+                RowLayout {
+                    Layout.fillWidth: true
+                    Label { text: "Отработано часов:" }
+                    SpinBox {
+                        id: hoursSpinBox
+                        Layout.preferredWidth: 150
+                        from: 0
+                        to: 2400
+                        stepSize: 1
+                        value: 80
+                        editable: true
+                        
+                        property int decimals: 1
+                        property real realValue: value / 10
+
+                        textFromValue: function(value, locale) {
+                            return Number(value / 10).toLocaleString(locale, 'f', decimals)
+                        }
+
+                        valueFromText: function(text, locale) {
+                            return Number.fromLocaleString(locale, text) * 10
+                        }
+                    }
+                    Label { 
+                        text: hoursSpinBox.realValue.toFixed(1) + " ч"
+                        color: "#666"
+                    }
+                }
+
+                // Примечание
+                RowLayout {
+                    Layout.fillWidth: true
+                    Label { text: "Примечание:" }
+                    TextField {
+                        id: workNotesField
+                        Layout.fillWidth: true
+                        placeholderText: "Описание работы..."
+                    }
+                }
+
+                // Кнопка добавления
+                Button {
+                    text: "Добавить часы"
+                    Layout.alignment: Qt.AlignRight
+                    highlighted: true
+                    enabled: inProgressMachineCombo.currentValue && employeeComboWorkLog.currentValue
+                    onClicked: {
+                        if (backend.logWorkHours(
+                            employeeComboWorkLog.currentValue,
+                            inProgressMachineCombo.currentValue,
+                            hoursSpinBox.realValue,
+                            workNotesField.text
+                        )) {
+                            workNotesField.clear()
+                            hoursSpinBox.value = 80
+                            inProgressMachineCombo.refreshInProgressList()
+                        }
+                    }
+                }
+
+                Label {
+                    text: "Часы работы увеличивают себестоимость выбранного станка"
+                    color: "#666"
+                    font.pixelSize: 11
+                    wrapMode: Text.WordWrap
                 }
             }
         }

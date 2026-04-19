@@ -127,6 +127,26 @@ class BackendController(QObject):
                 rows = cur.fetchall()
         return [{"id": row[0], "display": f"{row[1]} (ID {row[0]}, {row[2]:.2f} руб.)"} for row in rows]
 
+    @Slot(result="QVariantList")
+    def getInProgressMachinesList(self):
+        """Возвращает список станков в активном пуле (статус 'in_progress')."""
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT id, machine_model, produced_date
+                    FROM finished_goods
+                    WHERE status = 'in_progress'
+                    ORDER BY produced_date DESC
+                """)
+                rows = cur.fetchall()
+        return [
+            {
+                "id": row[0], 
+                "display": f"{row[1]} (ID {row[0]}, начат {row[2]})"
+            } 
+            for row in rows
+        ]
+
     # ---------- Учёт рабочего времени ----------
     @Slot(int, int, float, str, result=bool)
     def logWorkHours(self, employee_id, finished_good_id, hours, notes):
