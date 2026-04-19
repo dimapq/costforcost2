@@ -15,6 +15,7 @@ ApplicationWindow {
         TabButton { text: "👥 Сотрудники" }
         TabButton { text: "🏭 Станки" }
         TabButton { text: "💰 Финансы" }
+         TabButton { text: "Учёт работы" } 
     }
     StackLayout {
         id: stackLayout
@@ -26,6 +27,7 @@ ApplicationWindow {
         EmployeesPage { }     // Страница 3
         MachinesPage { }      // Страница 4
         FinancePage { }       // Страница 5
+        WorkLogPage {} 
 
    }
     
