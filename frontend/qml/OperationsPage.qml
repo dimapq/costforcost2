@@ -105,25 +105,25 @@ Page {
                     }
                 }
 
-                // Кнопка добавления
-                Button {
-                    text: "Добавить часы"
-                    Layout.alignment: Qt.AlignRight
-                    highlighted: true
-                    enabled: inProgressMachineCombo.currentValue && employeeComboWorkLog.currentValue
-                    onClicked: {
-                        if (backend.logWorkHours(
-                            employeeComboWorkLog.currentValue,
-                            inProgressMachineCombo.currentValue,
-                            hoursSpinBox.realValue,
-                            workNotesField.text
-                        )) {
-                            workNotesField.clear()
-                            hoursSpinBox.value = 80
-                            inProgressMachineCombo.refreshInProgressList()
+                    // Кнопка добавления
+                    Button {
+                        text: "Добавить часы"
+                        Layout.alignment: Qt.AlignRight
+                        highlighted: true
+                        enabled: inProgressMachineCombo.currentIndex >= 0 && employeeComboWorkLog.currentIndex >= 0
+                        onClicked: {
+                            if (backend.logWorkHours(
+                                employeeComboWorkLog.currentValue,
+                                inProgressMachineCombo.currentValue,
+                                hoursSpinBox.realValue,
+                                workNotesField.text
+                            )) {
+                                workNotesField.clear()
+                                hoursSpinBox.value = 80
+                                inProgressMachineCombo.refreshInProgressList()
+                            }
                         }
                     }
-                }
 
                 Label {
                     text: "Часы работы увеличивают себестоимость выбранного станка"

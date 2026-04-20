@@ -568,28 +568,33 @@ class BackendController(QObject):
     def sellFinishedGoodExtended(self, finished_good_id, sale_price, buyer, inv_number, sale_date):
         """Расширенная версия продажи с инв. номером и датой."""
         try:
-            from datetime import datetime
+            from datetime import datetime, date
+            
+            # Обработка даты
             if sale_date:
                 try:
                     sale_date_obj = datetime.strptime(sale_date, "%Y-%m-%d").date()
                 except:
-                    sale_date_obj = None
+                    sale_date_obj = date.today()
             else:
-                sale_date_obj = None
+                sale_date_obj = date.today()
 
             with get_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute("SELECT cost_price FROM finished_goods WHERE id = %s", (finished_good_id,))
-                    cost = cur.fetchone()
-                    if not cost:
+                    cost_row = cur.fetchone()
+                    if not cost_row:
+                        print("Станок не найден")
                         return False
-                    cost = cost[0]
-                    profit = sale_price - cost
+                    
+                    cost = cost_row[0]  # Decimal из БД
+                    sale_price_decimal = Decimal(str(sale_price))  # ← ИСПРАВЛЕНИЕ
+                    profit = sale_price_decimal - cost  # Теперь оба Decimal
 
                     cur.execute("""
                         INSERT INTO sales (finished_good_id, sale_price, profit, sale_date)
                         VALUES (%s, %s, %s, %s)
-                    """, (finished_good_id, Decimal(str(sale_price)), profit, sale_date_obj))
+                    """, (finished_good_id, sale_price_decimal, profit, sale_date_obj))
 
                     cur.execute("""
                         UPDATE finished_goods
@@ -603,12 +608,14 @@ class BackendController(QObject):
                     cur.execute("""
                         INSERT INTO balance (date, income, notes)
                         VALUES (%s, %s, %s)
-                    """, (sale_date_obj or 'CURRENT_DATE', sale_price, f"Продажа станка ID {finished_good_id} покупателю {buyer}"))
+                    """, (sale_date_obj, sale_price_decimal, f"Продажа станка ID {finished_good_id} покупателю {buyer}"))
 
                     conn.commit()
             return True
         except Exception as e:
             print(f"Ошибка продажи: {e}")
+            import traceback
+            traceback.print_exc()
             return False
 
     @Slot(int, result="QVariantMap")
@@ -714,6 +721,242 @@ class BackendController(QObject):
         except Exception as e:
             print(f"Ошибка получения деталей: {e}")
             return {"header": "Ошибка", "breakdown": str(e)}
+
+    @Slot(int, result=bool)
+    def returnMachineToStock(self, finished_good_id):
+        """Возвращает проданный станок на склад, удаляет запись о продаже."""
+        try:
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    # Проверяем что станок действительно продан
+                    cur.execute("""
+                        SELECT status FROM finished_goods WHERE id = %s
+                    """, (finished_good_id,))
+                    row = cur.fetchone()
+                    if not row or row[0] != 'sold':
+                        print("Станок не найден или не продан")
+                        return False
+
+                    # Удаляем запись о продаже
+                    cur.execute("""
+                        DELETE FROM sales WHERE finished_good_id = %s
+                    """, (finished_good_id,))
+
+                    # Возвращаем станок на склад
+                    cur.execute("""
+                        UPDATE finished_goods
+                        SET status = 'completed',
+                            buyer = NULL,
+                            sale_date = NULL
+                        WHERE id = %s
+                    """, (finished_good_id,))
+
+                    # Удаляем запись из баланса (если есть)
+                    cur.execute("""
+                        DELETE FROM balance 
+                        WHERE notes LIKE %s
+                    """, (f"%станка ID {finished_good_id}%",))
+
+                    conn.commit()
+                    print(f"Станок ID {finished_good_id} возвращён на склад")
+            return True
+        except Exception as e:
+            print(f"Ошибка возврата на склад: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
+    @Slot(str, str, int, result="QVariantList")
+    def getWorkHistory(self, date_from, date_to, employee_id=None):
+        """Возвращает историю работы с фильтрацией."""
+        try:
+            from datetime import datetime, date
+            
+            if date_from:
+                start_date = datetime.strptime(date_from, "%Y-%m-%d").date()
+            else:
+                today = date.today()
+                start_date = today.replace(day=1)
+                
+            if date_to:
+                end_date = datetime.strptime(date_to, "%Y-%m-%d").date()
+            else:
+                end_date = date.today()
+
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    if employee_id and employee_id > 0:
+                        cur.execute("""
+                            SELECT 
+                                wl.id,
+                                wl.date,
+                                e.name,
+                                fg.machine_model,
+                                wl.hours,
+                                e.hourly_rate,
+                                (wl.hours * e.hourly_rate) as cost
+                            FROM work_logs wl
+                            JOIN employees e ON wl.employee_id = e.id
+                            LEFT JOIN finished_good_labor fgl ON wl.id = fgl.work_log_id
+                            LEFT JOIN finished_goods fg ON fgl.finished_good_id = fg.id
+                            WHERE wl.date BETWEEN %s AND %s
+                            AND wl.employee_id = %s
+                            ORDER BY wl.date DESC, wl.id DESC
+                        """, (start_date, end_date, employee_id))
+                    else:
+                        cur.execute("""
+                            SELECT 
+                                wl.id,
+                                wl.date,
+                                e.name,
+                                fg.machine_model,
+                                wl.hours,
+                                e.hourly_rate,
+                                (wl.hours * e.hourly_rate) as cost
+                            FROM work_logs wl
+                            JOIN employees e ON wl.employee_id = e.id
+                            LEFT JOIN finished_good_labor fgl ON wl.id = fgl.work_log_id
+                            LEFT JOIN finished_goods fg ON fgl.finished_good_id = fg.id
+                            WHERE wl.date BETWEEN %s AND %s
+                            ORDER BY wl.date DESC, wl.id DESC
+                        """, (start_date, end_date))
+                    
+                    rows = cur.fetchall()
+                    
+            return [
+                {
+                    "work_log_id": r[0],
+                    "date": str(r[1]),
+                    "employee_name": r[2],
+                    "machine_model": r[3],
+                    "hours": float(r[4]),
+                    "hourly_rate": float(r[5]),
+                    "cost": float(r[6])
+                }
+                for r in rows
+            ]
+        except Exception as e:
+            print(f"Ошибка получения истории: {e}")
+            return []
+
+    @Slot(int, result=bool)
+    def undoWorkLog(self, work_log_id):
+        """Отменяет запись о работе и пересчитывает себестоимость станка."""
+        try:
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    # Получаем информацию о записи
+                    cur.execute("""
+                        SELECT e.hourly_rate, wl.hours, fgl.finished_good_id
+                        FROM work_logs wl
+                        JOIN employees e ON wl.employee_id = e.id
+                        LEFT JOIN finished_good_labor fgl ON wl.id = fgl.work_log_id
+                        WHERE wl.id = %s
+                    """, (work_log_id,))
+                    
+                    row = cur.fetchone()
+                    if not row:
+                        print("Запись не найдена")
+                        return False
+                        
+                    rate, hours, finished_good_id = row
+                    cost_to_subtract = rate * hours
+                    
+                    # Если привязано к станку — уменьшаем себестоимость
+                    if finished_good_id:
+                        cur.execute("""
+                            UPDATE finished_goods
+                            SET cost_price = cost_price - %s
+                            WHERE id = %s
+                        """, (cost_to_subtract, finished_good_id))
+                        
+                        # Удаляем связь
+                        cur.execute("""
+                            DELETE FROM finished_good_labor
+                            WHERE work_log_id = %s
+                        """, (work_log_id,))
+                    
+                    # Удаляем саму запись
+                    cur.execute("DELETE FROM work_logs WHERE id = %s", (work_log_id,))
+                    
+                    conn.commit()
+                    print(f"Запись о работе ID {work_log_id} отменена, себестоимость уменьшена на {cost_to_subtract:.2f}")
+            return True
+        except Exception as e:
+            print(f"Ошибка отмены записи: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
+    @Slot(int, float, str, str, str, float, result=bool)
+    def sellFinishedGoodWithShipping(self, finished_good_id, sale_price, buyer, inv_number, sale_date, shipping_cost):
+        """Продажа с учётом транспортировки."""
+        try:
+            from datetime import datetime, date
+            
+            if sale_date:
+                try:
+                    sale_date_obj = datetime.strptime(sale_date, "%Y-%m-%d").date()
+                except:
+                    sale_date_obj = date.today()
+            else:
+                sale_date_obj = date.today()
+
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT cost_price FROM finished_goods WHERE id = %s", (finished_good_id,))
+                    cost_row = cur.fetchone()
+                    if not cost_row:
+                        print("Станок не найден")
+                        return False
+                    
+                    cost = cost_row[0]
+                    shipping_cost_decimal = Decimal(str(shipping_cost))
+                    
+                    # Если доставка платная — добавляем к себестоимости
+                    if shipping_cost_decimal > 0:
+                        cur.execute("""
+                            UPDATE finished_goods
+                            SET cost_price = cost_price + %s
+                            WHERE id = %s
+                        """, (shipping_cost_decimal, finished_good_id))
+                        final_cost = cost + shipping_cost_decimal
+                    else:
+                        final_cost = cost
+                    
+                    sale_price_decimal = Decimal(str(sale_price))
+                    profit = sale_price_decimal - final_cost
+
+                    cur.execute("""
+                        INSERT INTO sales (finished_good_id, sale_price, profit, sale_date)
+                        VALUES (%s, %s, %s, %s)
+                    """, (finished_good_id, sale_price_decimal, profit, sale_date_obj))
+
+                    cur.execute("""
+                        UPDATE finished_goods
+                        SET status = 'sold', 
+                            buyer = %s, 
+                            sale_date = %s,
+                            inventory_number = COALESCE(%s, inventory_number)
+                        WHERE id = %s
+                    """, (buyer, sale_date_obj, inv_number if inv_number else None, finished_good_id))
+
+                    notes = f"Продажа станка ID {finished_good_id} покупателю {buyer}"
+                    if shipping_cost_decimal > 0:
+                        notes += f" (доставка {shipping_cost_decimal} ₽ включена в себестоимость)"
+
+                    cur.execute("""
+                        INSERT INTO balance (date, income, notes)
+                        VALUES (%s, %s, %s)
+                    """, (sale_date_obj, sale_price_decimal, notes))
+
+                    conn.commit()
+            return True
+        except Exception as e:
+            print(f"Ошибка продажи: {e}")
+            import traceback
+            traceback.print_exc()
+        return False
 
     @Slot(str, str)
     def exportReportToExcel(self, start_date_str, end_date_str):

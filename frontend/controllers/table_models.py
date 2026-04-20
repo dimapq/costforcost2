@@ -471,11 +471,47 @@ class FinishedGoodsModel(QAbstractTableModel):
         with get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("""
-                    SELECT id, machine_model, cost_price, produced_date, status,
-                        inventory_number, buyer, sale_date
-                    FROM finished_goods
-                    WHERE status = 'completed'  -- Только на складе
-                    ORDER BY produced_date DESC
+                    WITH machine_costs AS (
+                        SELECT 
+                            fg.id,
+                            -- Стоимость материалов
+                            COALESCE(SUM(
+                                mm.quantity * (
+                                    SELECT price_per_unit 
+                                    FROM purchases p 
+                                    WHERE p.material_id = mm.material_id 
+                                    AND p.price_per_unit IS NOT NULL
+                                    ORDER BY p.purchase_date DESC 
+                                    LIMIT 1
+                                )
+                            ), 0) as materials_cost,
+                            -- Стоимость работы
+                            COALESCE((
+                                SELECT SUM(wl.hours * e.hourly_rate)
+                                FROM work_logs wl
+                                JOIN employees e ON wl.employee_id = e.id
+                                JOIN finished_good_labor fgl ON wl.id = fgl.work_log_id
+                                WHERE fgl.finished_good_id = fg.id
+                            ), 0) as labor_cost
+                        FROM finished_goods fg
+                        LEFT JOIN machine_materials mm ON fg.machine_id = mm.machine_id
+                        GROUP BY fg.id
+                    )
+                    SELECT 
+                        fg.id, 
+                        fg.machine_model, 
+                        fg.cost_price, 
+                        fg.produced_date, 
+                        fg.status,
+                        fg.inventory_number, 
+                        fg.buyer, 
+                        fg.sale_date,
+                        mc.materials_cost,
+                        mc.labor_cost
+                    FROM finished_goods fg
+                    LEFT JOIN machine_costs mc ON fg.id = mc.id
+                    WHERE fg.status = 'completed'
+                    ORDER BY fg.produced_date DESC
                 """)
                 rows = cur.fetchall()
                 self._all_data = [
@@ -487,7 +523,9 @@ class FinishedGoodsModel(QAbstractTableModel):
                         'status': r[4],
                         'inv_num': r[5],
                         'buyer': r[6],
-                        'sale_date': str(r[7]) if r[7] else None
+                        'sale_date': str(r[7]) if r[7] else None,
+                        'materials_cost': float(r[8]) if r[8] else 0.0,
+                        'labor_cost': float(r[9]) if r[9] else 0.0
                     }
                     for r in rows
                 ]

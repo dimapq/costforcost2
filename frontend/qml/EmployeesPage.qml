@@ -6,196 +6,616 @@ import TableModels 1.0
 Page {
     title: "Сотрудники"
 
+    id: employeesRoot
+
     EmployeeTableModel { id: employeeModel }
 
-    RowLayout {
+    SplitView {
         anchors.fill: parent
-        anchors.margins: 10
-        spacing: 10
+        orientation: Qt.Horizontal
 
-        // Левая панель — таблица сотрудников
-        ColumnLayout {
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            spacing: 5
+        // ========== ЛЕВАЯ ПАНЕЛЬ: СПИСОК СОТРУДНИКОВ ==========
+        Item {
+            SplitView.preferredWidth: 500
+            SplitView.minimumWidth: 350
 
-            RowLayout {
-                Layout.fillWidth: true
-                TextField {
-                    id: employeeSearchField
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: 15
+                spacing: 10
+
+                // Заголовок и кнопки управления
+                RowLayout {
                     Layout.fillWidth: true
-                    placeholderText: "Поиск по имени..."
-                }
-                Button {
-                    text: "Обновить"
-                    onClicked: employeeModel.refresh()
-                }
-            }
-
-            TableView {
-                id: employeeTable
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                model: employeeModel
-                clip: true
-                columnWidthProvider: function(column) {
-                    if (column === 0) return 50    // ID
-                    if (column === 1) return 200   // Имя
-                    if (column === 2) return 100   // Ставка
-                    if (column === 3) return 120   // Должность
-                    return 80                      // Статус
-                }
-                delegate: Rectangle {
-                    implicitHeight: 30
-                    border.color: "#ddd"
-                    color: row % 2 ? "#f9f9f9" : "white"
-                    Text {
-                        anchors.centerIn: parent
-                        text: display
-                        font.pixelSize: 14
+                    Label {
+                        text: "Список сотрудников"
+                        font.pixelSize: 18
+                        font.bold: true
+                    }
+                    Item { Layout.fillWidth: true }
+                    Button {
+                        text: "Добавить сотрудника"
+                        highlighted: true
+                        onClicked: addEmployeeDialog.open()
+                    }
+                    Button {
+                        text: "Обновить"
+                        onClicked: employeeModel.refresh()
                     }
                 }
-                onCurrentRowChanged: {
-                    if (currentRow >= 0) {
-                        var emp = employeeModel.get(currentRow)
-                        editNameField.text = emp.name
-                        editRateField.text = emp.rate
-                        editPositionField.text = emp.position
-                        editActiveCheck.checked = emp.active
-                        selectedEmployeeId = emp.id
-                    }
-                }
-            }
 
-            RowLayout {
-                Layout.fillWidth: true
-                Button {
-                    text: "Добавить"
-                    onClicked: addEmployeeDialog.open()
-                }
-                Button {
-                    text: "Редактировать"
-                    enabled: selectedEmployeeId > 0
-                    onClicked: {
-                        if (selectedEmployeeId > 0) {
-                            backend.updateEmployee(selectedEmployeeId, editNameField.text, parseFloat(editRateField.text), editPositionField.text, editActiveCheck.checked)
-                            employeeModel.refresh()
-                            clearEditForm()
+                // Заголовок таблицы
+                Rectangle {
+                    Layout.fillWidth: true
+                    height: 35
+                    color: "#e8e8e8"
+                    border.color: "#ccc"
+
+                    RowLayout {
+                        anchors.fill: parent
+                        spacing: 0
+                        Repeater {
+                            model: ["ID", "Имя", "Ставка", "Должность", "Статус"]
+                            Rectangle {
+                                width: index === 0 ? 50 : index === 1 ? 150 : index === 2 ? 100 : index === 3 ? 120 : 80
+                                height: 35
+                                border.width: 0
+                                color: "transparent"
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: modelData
+                                    font.pixelSize: 13
+                                    font.bold: true
+                                }
+                            }
                         }
                     }
                 }
-                Button {
-                    text: "Уволить/Восстановить"
-                    enabled: selectedEmployeeId > 0
-                    onClicked: {
-                        if (selectedEmployeeId > 0) {
-                            backend.toggleEmployeeActive(selectedEmployeeId)
-                            employeeModel.refresh()
-                            clearEditForm()
+
+                // Таблица сотрудников
+                TableView {
+                    id: employeeTable
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    model: employeeModel
+                    clip: true
+
+                    property int selectedRow: -1
+                    property int selectedEmployeeId: -1
+
+                    columnWidthProvider: function(column) {
+                        if (column === 0) return 50
+                        if (column === 1) return 150
+                        if (column === 2) return 100
+                        if (column === 3) return 120
+                        return 80
+                    }
+
+                    delegate: Rectangle {
+                        implicitHeight: 40
+                        border.color: "#ddd"
+                        color: {
+                            if (employeeTable.selectedRow === row) return "#b3d9ff"
+                            return row % 2 ? "#f9f9f9" : "white"
                         }
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: display
+                            font.pixelSize: 14
+                            color: "black"
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            onClicked: {
+                                employeeTable.selectedRow = row
+                                var emp = employeeModel.get(row)
+                                employeeTable.selectedEmployeeId = emp.id
+                            }
+                        }
+                    }
+                }
+
+                // Кнопки действий
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 5
+
+                    Button {
+                        text: "Редактировать"
+                        enabled: employeeTable.selectedEmployeeId > 0
+                        onClicked: {
+                            var emp = employeeModel.get(employeeTable.selectedRow)
+                            editEmployeeDialog.employeeId = emp.id
+                            editEmployeeDialog.employeeName = emp.name
+                            editEmployeeDialog.employeeRate = emp.rate
+                            editEmployeeDialog.employeePosition = emp.position || ""
+                            editEmployeeDialog.employeeActive = emp.active
+                            editEmployeeDialog.open()
+                        }
+                    }
+
+                    Button {
+                        text: employeeTable.selectedEmployeeId > 0 ? 
+                              (employeeModel.get(employeeTable.selectedRow).active ? "Деактивировать" : "Активировать") : 
+                              "Изменить статус"
+                        enabled: employeeTable.selectedEmployeeId > 0
+                        onClicked: {
+                            backend.toggleEmployeeActive(employeeTable.selectedEmployeeId)
+                            employeeModel.refresh()
+                        }
+                    }
+
+                    Item { Layout.fillWidth: true }
+
+                    Button {
+                        text: "Расчёт зарплаты"
+                        onClicked: payrollDialog.open()
                     }
                 }
             }
         }
 
-        // Правая панель — детали и расчёт зарплаты
-        ColumnLayout {
-            Layout.preferredWidth: 300
-            Layout.fillHeight: true
-            spacing: 10
+        // ========== ПРАВАЯ ПАНЕЛЬ: ИСТОРИЯ ДЕЙСТВИЙ ==========
+        Item {
+            SplitView.fillWidth: true
+            SplitView.minimumWidth: 400
 
-            GroupBox {
-                title: "Детали сотрудника"
-                Layout.fillWidth: true
-                GridLayout {
-                    anchors.fill: parent
-                    columns: 2
-                    rowSpacing: 5
-                    columnSpacing: 10
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: 15
+                spacing: 10
 
-                    Label { text: "Имя:" }
-                    TextField { id: editNameField; Layout.fillWidth: true }
-                    Label { text: "Ставка (руб/ч):" }
-                    TextField { id: editRateField; Layout.fillWidth: true; validator: DoubleValidator { bottom: 0.01 } }
-                    Label { text: "Должность:" }
-                    TextField { id: editPositionField; Layout.fillWidth: true }
-                    Label { text: "Активен:" }
-                    CheckBox { id: editActiveCheck }
-                }
-            }
-
-            GroupBox {
-                title: "Расчёт зарплаты"
-                Layout.fillWidth: true
-                Layout.preferredHeight: 200
-                ColumnLayout {
-                    anchors.fill: parent
-                    spacing: 5
-                    Label { text: "Период:" }
-                    RowLayout {
-                        TextField { id: startDateField; placeholderText: "ГГГГ-ММ-ДД"; Layout.fillWidth: true }
-                        Label { text: "–" }
-                        TextField { id: endDateField; placeholderText: "ГГГГ-ММ-ДД"; Layout.fillWidth: true }
+                // Заголовок истории
+                RowLayout {
+                    Layout.fillWidth: true
+                    Label {
+                        text: "История работы"
+                        font.pixelSize: 18
+                        font.bold: true
                     }
+                    Item { Layout.fillWidth: true }
                     Button {
-                        text: "Рассчитать"
-                        Layout.fillWidth: true
-                        onClicked: {
-                            var result = backend.calculatePayroll(startDateField.text, endDateField.text)
-                            payrollResultText.text = result
+                        text: "Обновить историю"
+                        onClicked: workHistoryList.loadHistory()
+                    }
+                }
+
+                // Фильтры
+                GroupBox {
+                    Layout.fillWidth: true
+                    title: "Фильтры"
+
+                    GridLayout {
+                        anchors.fill: parent
+                        columns: 4
+                        columnSpacing: 10
+                        rowSpacing: 5
+
+                        Label { text: "С даты:" }
+                        TextField {
+                            id: dateFromField
+                            Layout.fillWidth: true
+                            placeholderText: "ГГГГ-ММ-ДД"
+                            text: {
+                                var date = new Date()
+                                date.setMonth(date.getMonth() - 1)
+                                Qt.formatDate(date, "yyyy-MM-dd")
+                            }
+                        }
+
+                        Label { text: "По дату:" }
+                        TextField {
+                            id: dateToField
+                            Layout.fillWidth: true
+                            placeholderText: "ГГГГ-ММ-ДД"
+                            text: Qt.formatDate(new Date(), "yyyy-MM-dd")
+                        }
+
+                        Label { text: "Сотрудник:" }
+                        ComboBox {
+                            id: filterEmployeeCombo
+                            Layout.fillWidth: true
+                            Layout.columnSpan: 3
+                            model: ListModel {
+                                id: filterEmployeeList
+                                ListElement { employee_id: -1; name: "Все сотрудники" }
+                            }
+                            textRole: "name"
+                            valueRole: "employee_id"  // Изменено с "id" на "employee_id"
+                            
+                            Component.onCompleted: {
+                                var emps = backend.getEmployeesList()
+                                for (var i = 0; i < emps.length; i++) {
+                                    filterEmployeeList.append({
+                                        employee_id: emps[i].id,
+                                        name: emps[i].name
+                                    })
+                                }
+                            }
+                        }
+
+                        Button {
+                            text: "Применить фильтр"
+                            Layout.columnSpan: 4
+                            Layout.fillWidth: true
+                            highlighted: true
+                            onClicked: workHistoryList.loadHistory()
                         }
                     }
-                    ScrollView {
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        TextArea {
-                            id: payrollResultText
-                            readOnly: true
-                            wrapMode: Text.Wrap
+                }
+
+                // Заголовок таблицы истории
+                Rectangle {
+                    Layout.fillWidth: true
+                    height: 35
+                    color: "#e8e8e8"
+                    border.color: "#ccc"
+
+                    RowLayout {
+                        anchors.fill: parent
+                        spacing: 0
+                        Repeater {
+                            model: ["ID", "Дата", "Сотрудник", "Станок", "Часы", "Стоимость", ""]
+                            Rectangle {
+                                width: index === 0 ? 50 : index === 1 ? 100 : index === 2 ? 150 : index === 3 ? 150 : index === 4 ? 80 : index === 5 ? 100 : 80
+                                height: 35
+                                border.width: 0
+                                color: "transparent"
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: modelData
+                                    font.pixelSize: 13
+                                    font.bold: true
+                                }
+                            }
                         }
                     }
+                }
+
+                // Список истории работы
+                ScrollView {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    clip: true
+
+                    ListView {
+                        id: workHistoryList
+                        model: ListModel { id: workHistoryModel }
+                        spacing: 2
+
+                        delegate: Rectangle {
+                            width: workHistoryList.width
+                            height: 40
+                            border.color: "#ddd"
+                            color: index % 2 ? "#f9f9f9" : "white"
+
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.margins: 5
+                                spacing: 0
+
+                                Text {
+                                    Layout.preferredWidth: 50
+                                    text: model.work_log_id
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
+                                    font.pixelSize: 13
+                                }
+
+                                Text {
+                                    Layout.preferredWidth: 100
+                                    text: model.date
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
+                                    font.pixelSize: 13
+                                }
+
+                                Text {
+                                    Layout.preferredWidth: 150
+                                    text: model.employee_name
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
+                                    font.pixelSize: 13
+                                }
+
+                                Text {
+                                    Layout.preferredWidth: 150
+                                    text: model.machine_model || "—"
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
+                                    font.pixelSize: 13
+                                }
+
+                                Text {
+                                    Layout.preferredWidth: 80
+                                    text: model.hours.toFixed(1) + " ч"
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
+                                    font.pixelSize: 13
+                                }
+
+                                Text {
+                                    Layout.preferredWidth: 100
+                                    text: model.cost.toFixed(2) + " ₽"
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
+                                    font.pixelSize: 13
+                                    font.bold: true
+                                    color: "#2c5aa0"
+                                }
+
+                                Button {
+                                    Layout.preferredWidth: 80
+                                    text: "Отменить"
+                                    flat: true
+                                    onClicked: {
+                                        undoWorkLogDialog.workLogId = model.work_log_id
+                                        undoWorkLogDialog.employeeName = model.employee_name
+                                        undoWorkLogDialog.hours = model.hours
+                                        undoWorkLogDialog.machineModel = model.machine_model
+                                        undoWorkLogDialog.open()
+                                    }
+                                }
+                            }
+                        }
+
+                        function loadHistory() {
+                            workHistoryModel.clear()
+                            var employeeId = filterEmployeeCombo.currentValue
+                            var history = backend.getWorkHistory(
+                                dateFromField.text,
+                                dateToField.text,
+                                employeeId > 0 ? employeeId : null
+                            )
+                            for (var i = 0; i < history.length; i++) {
+                                workHistoryModel.append(history[i])
+                            }
+                        }
+
+                        Component.onCompleted: loadHistory()
+                    }
+                }
+
+                Label {
+                    visible: workHistoryModel.count === 0
+                    text: "Нет записей о работе за выбранный период"
+                    color: "#666"
+                    Layout.alignment: Qt.AlignHCenter
                 }
             }
         }
     }
 
-    // Диалог добавления нового сотрудника
+    // ========== ДИАЛОГИ ==========
+
+    // Добавление сотрудника
     Dialog {
         id: addEmployeeDialog
         title: "Добавить сотрудника"
         standardButtons: Dialog.Ok | Dialog.Cancel
-        width: 400
-        height: 250
+        width: 450
+        height: 300
+
         ColumnLayout {
             anchors.fill: parent
             spacing: 10
+
             Label { text: "Имя:" }
-            TextField { id: newName; Layout.fillWidth: true }
-            Label { text: "Ставка (руб/ч):" }
-            TextField { id: newRate; Layout.fillWidth: true; validator: DoubleValidator { bottom: 0.01 } }
+            TextField {
+                id: newEmployeeName
+                Layout.fillWidth: true
+                placeholderText: "Фамилия Имя Отчество"
+            }
+
+            Label { text: "Почасовая ставка (руб/ч):" }
+            TextField {
+                id: newEmployeeRate
+                Layout.fillWidth: true
+                validator: DoubleValidator { bottom: 0.01 }
+                placeholderText: "Например: 500"
+            }
+
             Label { text: "Должность:" }
-            TextField { id: newPosition; Layout.fillWidth: true }
+            TextField {
+                id: newEmployeePosition
+                Layout.fillWidth: true
+                placeholderText: "Например: Слесарь, Сборщик"
+            }
+
+            Label {
+                id: addEmployeeError
+                color: "red"
+                visible: false
+                text: "Заполните имя и ставку"
+            }
         }
+
+        onOpened: {
+            newEmployeeName.clear()
+            newEmployeeRate.clear()
+            newEmployeePosition.clear()
+            addEmployeeError.visible = false
+        }
+
         onAccepted: {
-            if (newName.text && newRate.text) {
-                backend.addEmployee(newName.text, parseFloat(newRate.text), newPosition.text)
-                employeeModel.refresh()
-                newName.clear()
-                newRate.clear()
-                newPosition.clear()
+            if (newEmployeeName.text && newEmployeeRate.text) {
+                if (backend.addEmployee(
+                    newEmployeeName.text,
+                    parseFloat(newEmployeeRate.text),
+                    newEmployeePosition.text
+                )) {
+                    employeeModel.refresh()
+                    filterEmployeeList.clear()
+                    filterEmployeeList.append({employee_id: -1, name: "Все сотрудники"})
+                    var emps = backend.getEmployeesList()
+                    for (var i = 0; i < emps.length; i++) {
+                        filterEmployeeList.append({
+                            employee_id: emps[i].id,
+                            name: emps[i].name
+                        })
+                    }
+                }
+            } else {
+                addEmployeeError.visible = true
             }
         }
     }
 
-    property int selectedEmployeeId: -1
+    // Редактирование сотрудника
+    Dialog {
+        id: editEmployeeDialog
+        title: "Редактировать сотрудника"
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        width: 450
+        height: 350
 
-    function clearEditForm() {
-        editNameField.clear()
-        editRateField.clear()
-        editPositionField.clear()
-        editActiveCheck.checked = true
-        selectedEmployeeId = -1
+        property int employeeId: -1
+        property string employeeName: ""
+        property real employeeRate: 0
+        property string employeePosition: ""
+        property bool employeeActive: true
+
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 10
+
+            Label { text: "Имя:" }
+            TextField {
+                id: editEmployeeName
+                Layout.fillWidth: true
+                text: editEmployeeDialog.employeeName
+            }
+
+            Label { text: "Почасовая ставка (руб/ч):" }
+            TextField {
+                id: editEmployeeRate
+                Layout.fillWidth: true
+                validator: DoubleValidator { bottom: 0.01 }
+                text: editEmployeeDialog.employeeRate.toString()
+            }
+
+            Label { text: "Должность:" }
+            TextField {
+                id: editEmployeePosition
+                Layout.fillWidth: true
+                text: editEmployeeDialog.employeePosition
+            }
+
+            CheckBox {
+                id: editEmployeeActive
+                text: "Активен"
+                checked: editEmployeeDialog.employeeActive
+            }
+        }
+
+        onAccepted: {
+            if (backend.updateEmployee(
+                employeeId,
+                editEmployeeName.text,
+                parseFloat(editEmployeeRate.text),
+                editEmployeePosition.text,
+                editEmployeeActive.checked
+            )) {
+                employeeModel.refresh()
+            }
+        }
     }
 
-    Component.onCompleted: employeeModel.refresh()
+    // Расчёт зарплаты
+    Dialog {
+        id: payrollDialog
+        title: "Расчёт зарплаты"
+        standardButtons: Dialog.Close
+        width: 500
+        height: 450
+
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 10
+
+            Label { text: "Период:" }
+            RowLayout {
+                Layout.fillWidth: true
+                TextField {
+                    id: payrollStartDate
+                    Layout.fillWidth: true
+                    placeholderText: "ГГГГ-ММ-ДД"
+                    text: {
+                        var date = new Date()
+                        date.setDate(1)
+                        Qt.formatDate(date, "yyyy-MM-dd")
+                    }
+                }
+                Label { text: "—" }
+                TextField {
+                    id: payrollEndDate
+                    Layout.fillWidth: true
+                    placeholderText: "ГГГГ-ММ-ДД"
+                    text: Qt.formatDate(new Date(), "yyyy-MM-dd")
+                }
+            }
+
+            Button {
+                text: "Рассчитать"
+                Layout.fillWidth: true
+                highlighted: true
+                onClicked: {
+                    var result = backend.calculatePayroll(payrollStartDate.text, payrollEndDate.text)
+                    payrollResultText.text = result
+                }
+            }
+
+            ScrollView {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                clip: true
+
+                TextArea {
+                    id: payrollResultText
+                    readOnly: true
+                    wrapMode: TextArea.Wrap
+                    font.family: "Courier New"
+                    font.pixelSize: 12
+                    text: "Нажмите 'Рассчитать' для получения данных"
+                }
+            }
+        }
+    }
+
+    // Отмена записи о работе
+    Dialog {
+        id: undoWorkLogDialog
+        title: "Отменить запись о работе"
+        standardButtons: Dialog.Yes | Dialog.No
+        width: 450
+        height: 200
+
+        property int workLogId: -1
+        property string employeeName: ""
+        property real hours: 0
+        property string machineModel: ""
+
+        Label {
+            text: "Отменить запись о работе?\n\n" +
+                  "Сотрудник: " + undoWorkLogDialog.employeeName + "\n" +
+                  "Часы: " + undoWorkLogDialog.hours.toFixed(1) + " ч\n" +
+                  "Станок: " + (undoWorkLogDialog.machineModel || "—") + "\n\n" +
+                  "Себестоимость станка будет пересчитана."
+            wrapMode: Text.WordWrap
+            anchors.fill: parent
+            anchors.margins: 10
+        }
+
+        onAccepted: {
+            if (backend.undoWorkLog(undoWorkLogDialog.workLogId)) {
+                workHistoryList.loadHistory()
+            }
+        }
+    }
+
+    Component.onCompleted: {
+        employeeModel.refresh()
+    }
 }
