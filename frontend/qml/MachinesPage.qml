@@ -515,7 +515,16 @@ Page {
                                     soldListModel.clear()
                                     allSoldData = backend.getSoldMachinesList()
                                     for (var i = 0; i < allSoldData.length; i++) {
-                                        soldListModel.append(allSoldData[i])
+                                        var item = allSoldData[i] || {}
+                                        soldListModel.append({
+                                            "id": item.id !== undefined ? item.id : -1,
+                                            "machine_model": item.machine_model !== undefined ? item.machine_model : "",
+                                            "inv_num": item.inv_num !== undefined ? item.inv_num : "",
+                                            "sale_date": item.sale_date !== undefined ? item.sale_date : "",
+                                            "buyer": item.buyer !== undefined ? item.buyer : "",
+                                            "sale_price": item.sale_price !== undefined ? item.sale_price : 0,
+                                            "profit": item.profit !== undefined ? item.profit : 0
+                                        })
                                     }
                                 }
 
@@ -579,7 +588,16 @@ Page {
                                 (item.buyer && item.buyer.toLowerCase().includes(search))
                         })
                         for (var i = 0; i < filtered.length; i++) {
-                            soldListModel.append(filtered[i])
+                            var item = filtered[i] || {}
+                            soldListModel.append({
+                                "id": item.id !== undefined ? item.id : -1,
+                                "machine_model": item.machine_model !== undefined ? item.machine_model : "",
+                                "inv_num": item.inv_num !== undefined ? item.inv_num : "",
+                                "sale_date": item.sale_date !== undefined ? item.sale_date : "",
+                                "buyer": item.buyer !== undefined ? item.buyer : "",
+                                "sale_price": item.sale_price !== undefined ? item.sale_price : 0,
+                                "profit": item.profit !== undefined ? item.profit : 0
+                            })
                         }
                     }
                 }

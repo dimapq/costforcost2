@@ -7,13 +7,14 @@ class MaterialTableModel(QAbstractTableModel):
     def __init__(self):
         super().__init__()
         self._data = []
+        self._extra_headers = ["Откуда взят", "Примечание"]
         self._headers = ["ID", "Название", "Остаток", "Цена за ед.", "Сумма"]
 
     def rowCount(self, parent=QModelIndex()):
         return len(self._data)
 
     def columnCount(self, parent=QModelIndex()):
-        return len(self._headers)
+        return len(self._headers) + len(self._extra_headers)
 
     def data(self, index, role=Qt.DisplayRole):
         if not index.isValid():
@@ -31,18 +32,34 @@ class MaterialTableModel(QAbstractTableModel):
                 return f"{row['price']:.2f}" if row['price'] else "—"
             elif col == 4:
                 return f"{row['total']:.2f}" if row['total'] else "—"
+            elif col == 5:
+                return row.get('source') or "-"
+            elif col == 6:
+                return row.get('notes') or "-"
         return None
 
     def headerData(self, section, orientation, role=Qt.DisplayRole):
         if orientation == Qt.Horizontal and role == Qt.DisplayRole:
+            if section == 5:
+                return self._extra_headers[0]
+            if section == 6:
+                return self._extra_headers[1]
             return self._headers[section]
         return None
+
+    @Slot(int, result="QVariantMap")
+    def get(self, row):
+        if 0 <= row < len(self._data):
+            return self._data[row]
+        return {}
 
     @Slot()
     def refresh(self):
         self.beginResetModel()
         with get_connection() as conn:
             with conn.cursor() as cur:
+                cur.execute("ALTER TABLE IF EXISTS materials ADD COLUMN IF NOT EXISTS source TEXT")
+                cur.execute("ALTER TABLE IF EXISTS materials ADD COLUMN IF NOT EXISTS notes TEXT")
                 cur.execute("""
                     WITH latest_prices AS (
                         SELECT DISTINCT ON (material_id) material_id, price_per_unit
@@ -54,7 +71,9 @@ class MaterialTableModel(QAbstractTableModel):
                         m.name,
                         COALESCE(inv.quantity, 0) AS qty,
                         lp.price_per_unit,
-                        COALESCE(lp.price_per_unit * inv.quantity, 0) AS total
+                        COALESCE(lp.price_per_unit * inv.quantity, 0) AS total,
+                        m.source,
+                        m.notes
                     FROM materials m
                     LEFT JOIN material_inventory inv ON m.id = inv.material_id
                     LEFT JOIN latest_prices lp ON m.id = lp.material_id
@@ -68,7 +87,9 @@ class MaterialTableModel(QAbstractTableModel):
                         'name': r[1],
                         'quantity': r[2],
                         'price': r[3],
-                        'total': r[4]
+                        'total': r[4],
+                        'source': r[5],
+                        'notes': r[6]
                     }
                     for r in rows
                 ]

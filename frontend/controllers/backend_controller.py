@@ -197,16 +197,22 @@ class BackendController(QObject):
             return []
 
     # ---------- Материалы ----------
-    @Slot(str, str, float, float, result=bool)
-    def addMaterial(self, name, unit, price, quantity):
+    @Slot(str, str, float, float, str, str, result=bool)
+    def addMaterial(self, name, unit, price, quantity, source, notes):
         try:
             with get_connection() as conn:
                 with conn.cursor() as cur:
+                    cur.execute("ALTER TABLE IF EXISTS materials ADD COLUMN IF NOT EXISTS source TEXT")
+                    cur.execute("ALTER TABLE IF EXISTS materials ADD COLUMN IF NOT EXISTS notes TEXT")
                     cur.execute("""
-                        INSERT INTO materials (name, unit) VALUES (%s, %s)
-                        ON CONFLICT (name) DO UPDATE SET unit = EXCLUDED.unit
+                        INSERT INTO materials (name, unit, source, notes)
+                        VALUES (%s, %s, NULLIF(%s, ''), NULLIF(%s, ''))
+                        ON CONFLICT (name) DO UPDATE SET
+                            unit = EXCLUDED.unit,
+                            source = COALESCE(EXCLUDED.source, materials.source),
+                            notes = COALESCE(EXCLUDED.notes, materials.notes)
                         RETURNING id
-                    """, (name, unit))
+                    """, (name, unit, source, notes))
                     mat_id = cur.fetchone()[0]
                     cur.execute("""
                         INSERT INTO purchases (material_id, price_per_unit, quantity, remaining_quantity, purchase_date)
@@ -226,7 +232,7 @@ class BackendController(QObject):
     def parseAndAddMaterial(self, url):
         try:
             from backend.models.scraper import quick_add_product
-            quick_add_product(url)
+            quick_add_product(url, notes=url)
             return True
         except Exception as e:
             print(f"Ошибка парсинга: {e}")

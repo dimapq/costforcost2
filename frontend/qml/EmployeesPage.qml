@@ -162,6 +162,9 @@ Page {
             SplitView.fillWidth: true
             SplitView.minimumWidth: 400
 
+            property int selectedWorkLogId: -1
+            property int selectedHistoryRow: -1
+
             ColumnLayout {
                 anchors.fill: parent
                 anchors.margins: 15
@@ -178,7 +181,11 @@ Page {
                     Item { Layout.fillWidth: true }
                     Button {
                         text: "Обновить историю"
-                        onClicked: workHistoryList.loadHistory()
+                        onClicked: {
+                            workHistoryList.loadHistory()
+                            parent.parent.parent.selectedWorkLogId = -1
+                            parent.parent.parent.selectedHistoryRow = -1
+                        }
                     }
                 }
 
@@ -223,7 +230,7 @@ Page {
                                 ListElement { employee_id: -1; name: "Все сотрудники" }
                             }
                             textRole: "name"
-                            valueRole: "employee_id"  // Изменено с "id" на "employee_id"
+                            valueRole: "employee_id"
                             
                             Component.onCompleted: {
                                 var emps = backend.getEmployeesList()
@@ -253,13 +260,13 @@ Page {
                     color: "#e8e8e8"
                     border.color: "#ccc"
 
-                    RowLayout {
+                    Row {
                         anchors.fill: parent
                         spacing: 0
                         Repeater {
-                            model: ["ID", "Дата", "Сотрудник", "Станок", "Часы", "Стоимость", ""]
+                            model: ["ID", "Дата", "Сотрудник", "Станок", "Часы", "Стоимость"]
                             Rectangle {
-                                width: index === 0 ? 50 : index === 1 ? 100 : index === 2 ? 150 : index === 3 ? 150 : index === 4 ? 80 : index === 5 ? 100 : 80
+                                width: index === 0 ? 50 : index === 1 ? 100 : index === 2 ? 180 : index === 3 ? 180 : index === 4 ? 80 : 120
                                 height: 35
                                 border.width: 0
                                 color: "transparent"
@@ -283,80 +290,105 @@ Page {
                     ListView {
                         id: workHistoryList
                         model: ListModel { id: workHistoryModel }
-                        spacing: 2
+                        spacing: 0
 
                         delegate: Rectangle {
                             width: workHistoryList.width
                             height: 40
                             border.color: "#ddd"
-                            color: index % 2 ? "#f9f9f9" : "white"
+                            color: {
+                                if (parent.parent.parent.parent.selectedHistoryRow === index) return "#b3d9ff"
+                                return index % 2 ? "#f9f9f9" : "white"
+                            }
 
-                            RowLayout {
+                            Row {
                                 anchors.fill: parent
-                                anchors.margins: 5
                                 spacing: 0
 
-                                Text {
-                                    Layout.preferredWidth: 50
-                                    text: model.work_log_id
-                                    horizontalAlignment: Text.AlignHCenter
-                                    verticalAlignment: Text.AlignVCenter
-                                    font.pixelSize: 13
-                                }
-
-                                Text {
-                                    Layout.preferredWidth: 100
-                                    text: model.date
-                                    horizontalAlignment: Text.AlignHCenter
-                                    verticalAlignment: Text.AlignVCenter
-                                    font.pixelSize: 13
-                                }
-
-                                Text {
-                                    Layout.preferredWidth: 150
-                                    text: model.employee_name
-                                    horizontalAlignment: Text.AlignHCenter
-                                    verticalAlignment: Text.AlignVCenter
-                                    font.pixelSize: 13
-                                }
-
-                                Text {
-                                    Layout.preferredWidth: 150
-                                    text: model.machine_model || "—"
-                                    horizontalAlignment: Text.AlignHCenter
-                                    verticalAlignment: Text.AlignVCenter
-                                    font.pixelSize: 13
-                                }
-
-                                Text {
-                                    Layout.preferredWidth: 80
-                                    text: model.hours.toFixed(1) + " ч"
-                                    horizontalAlignment: Text.AlignHCenter
-                                    verticalAlignment: Text.AlignVCenter
-                                    font.pixelSize: 13
-                                }
-
-                                Text {
-                                    Layout.preferredWidth: 100
-                                    text: model.cost.toFixed(2) + " ₽"
-                                    horizontalAlignment: Text.AlignHCenter
-                                    verticalAlignment: Text.AlignVCenter
-                                    font.pixelSize: 13
-                                    font.bold: true
-                                    color: "#2c5aa0"
-                                }
-
-                                Button {
-                                    Layout.preferredWidth: 80
-                                    text: "Отменить"
-                                    flat: true
-                                    onClicked: {
-                                        undoWorkLogDialog.workLogId = model.work_log_id
-                                        undoWorkLogDialog.employeeName = model.employee_name
-                                        undoWorkLogDialog.hours = model.hours
-                                        undoWorkLogDialog.machineModel = model.machine_model
-                                        undoWorkLogDialog.open()
+                                // ID
+                                Rectangle {
+                                    width: 50
+                                    height: 40
+                                    color: "transparent"
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: model.work_log_id
+                                        font.pixelSize: 13
                                     }
+                                }
+
+                                // Дата
+                                Rectangle {
+                                    width: 100
+                                    height: 40
+                                    color: "transparent"
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: model.date
+                                        font.pixelSize: 13
+                                    }
+                                }
+
+                                // Сотрудник
+                                Rectangle {
+                                    width: 180
+                                    height: 40
+                                    color: "transparent"
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: model.employee_name
+                                        font.pixelSize: 13
+                                        elide: Text.ElideRight
+                                        width: parent.width - 10
+                                    }
+                                }
+
+                                // Станок
+                                Rectangle {
+                                    width: 180
+                                    height: 40
+                                    color: "transparent"
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: model.machine_model || "—"
+                                        font.pixelSize: 13
+                                        elide: Text.ElideRight
+                                        width: parent.width - 10
+                                    }
+                                }
+
+                                // Часы
+                                Rectangle {
+                                    width: 80
+                                    height: 40
+                                    color: "transparent"
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: model.hours.toFixed(1) + " ч"
+                                        font.pixelSize: 13
+                                    }
+                                }
+
+                                // Стоимость
+                                Rectangle {
+                                    width: 120
+                                    height: 40
+                                    color: "transparent"
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: model.cost.toFixed(2) + " ₽"
+                                        font.pixelSize: 13
+                                        font.bold: true
+                                        color: "#2c5aa0"
+                                    }
+                                }
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                onClicked: {
+                                    parent.parent.parent.parent.parent.selectedHistoryRow = index
+                                    parent.parent.parent.parent.parent.selectedWorkLogId = model.work_log_id
                                 }
                             }
                         }
@@ -383,6 +415,40 @@ Page {
                     text: "Нет записей о работе за выбранный период"
                     color: "#666"
                     Layout.alignment: Qt.AlignHCenter
+                }
+
+                // КНОПКА УДАЛЕНИЯ
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 10
+
+                    Label {
+                        visible: parent.parent.selectedWorkLogId > 0
+                        text: "Выбрана запись ID: " + parent.parent.selectedWorkLogId
+                        font.bold: true
+                        color: "#2c5aa0"
+                    }
+
+                    Item { Layout.fillWidth: true }
+
+                    Button {
+                        text: "Удалить выбранную запись"
+                        enabled: parent.parent.selectedWorkLogId > 0
+                        highlighted: parent.parent.selectedWorkLogId > 0
+                        onClicked: {
+                            var selectedId = parent.parent.selectedWorkLogId
+                            var selectedIndex = parent.parent.selectedHistoryRow
+                            
+                            if (selectedId > 0 && selectedIndex >= 0) {
+                                var record = workHistoryModel.get(selectedIndex)
+                                undoWorkLogDialog.workLogId = selectedId
+                                undoWorkLogDialog.employeeName = record.employee_name
+                                undoWorkLogDialog.hours = record.hours
+                                undoWorkLogDialog.machineModel = record.machine_model
+                                undoWorkLogDialog.open()
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -587,29 +653,76 @@ Page {
     // Отмена записи о работе
     Dialog {
         id: undoWorkLogDialog
-        title: "Отменить запись о работе"
+        title: "Удалить запись о работе"
         standardButtons: Dialog.Yes | Dialog.No
-        width: 450
-        height: 200
+        width: 500
+        height: 250
 
         property int workLogId: -1
         property string employeeName: ""
         property real hours: 0
         property string machineModel: ""
 
-        Label {
-            text: "Отменить запись о работе?\n\n" +
-                  "Сотрудник: " + undoWorkLogDialog.employeeName + "\n" +
-                  "Часы: " + undoWorkLogDialog.hours.toFixed(1) + " ч\n" +
-                  "Станок: " + (undoWorkLogDialog.machineModel || "—") + "\n\n" +
-                  "Себестоимость станка будет пересчитана."
-            wrapMode: Text.WordWrap
+        ColumnLayout {
             anchors.fill: parent
-            anchors.margins: 10
+            spacing: 10
+
+            Label {
+                text: "Удалить запись о работе?"
+                font.bold: true
+                font.pixelSize: 16
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                height: 1
+                color: "#ccc"
+            }
+
+            GridLayout {
+                columns: 2
+                columnSpacing: 15
+                rowSpacing: 8
+
+                Label { text: "ID записи:"; font.bold: true }
+                Label { text: undoWorkLogDialog.workLogId }
+
+                Label { text: "Сотрудник:"; font.bold: true }
+                Label { text: undoWorkLogDialog.employeeName }
+
+                Label { text: "Часы:"; font.bold: true }
+                Label { text: undoWorkLogDialog.hours.toFixed(1) + " ч" }
+
+                Label { text: "Станок:"; font.bold: true }
+                Label { text: undoWorkLogDialog.machineModel || "—" }
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                height: 1
+                color: "#ccc"
+            }
+
+            Label {
+                text: "⚠ Себестоимость станка будет пересчитана (уменьшена на стоимость этой работы)"
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+                font.pixelSize: 12
+                color: "#d9534f"
+            }
         }
 
         onAccepted: {
             if (backend.undoWorkLog(undoWorkLogDialog.workLogId)) {
+                // Сбрасываем выбор
+                for (var i = 0; i < employeesRoot.children.length; i++) {
+                    var child = employeesRoot.children[i]
+                    if (child.selectedWorkLogId !== undefined) {
+                        child.selectedWorkLogId = -1
+                        child.selectedHistoryRow = -1
+                        break
+                    }
+                }
                 workHistoryList.loadHistory()
             }
         }

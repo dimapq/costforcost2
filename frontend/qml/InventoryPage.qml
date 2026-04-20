@@ -27,6 +27,12 @@ Page {
 
         // ================= ВКЛАДКА МАТЕРИАЛЫ =================
         Item {
+            id: materialsTab
+            property int selectedMaterialRow: -1
+            property int selectedMaterialId: -1
+            property string selectedMaterialName: ""
+            property real selectedMaterialQty: 0
+
             ColumnLayout {
                 anchors.fill: parent
                 anchors.margins: 10
@@ -60,9 +66,52 @@ Page {
                         text: "Инвентаризация"
                         onClicked: inventoryDialog.open()
                     }
+                    Item { Layout.fillWidth: true }
+                    Button {
+                        text: "Изменить количество"
+                        enabled: materialsTab.selectedMaterialId > 0
+                        highlighted: materialsTab.selectedMaterialId > 0
+                        onClicked: {
+                            editQtyField.text = materialsTab.selectedMaterialQty.toFixed(2)
+                            editReasonField.clear()
+                            editQtyDialog.open()
+                        }
+                    }
+                    Button {
+                        text: "Удалить со склада"
+                        enabled: materialsTab.selectedMaterialId > 0
+                        onClicked: {
+                            deleteReasonField.clear()
+                            deleteMaterialDialog.open()
+                        }
+                    }
                 }
 
                 // Таблица материалов
+                Rectangle {
+                    Layout.fillWidth: true
+                    height: 34
+                    color: "#e8e8e8"
+                    border.color: "#ccc"
+                    Row {
+                        anchors.fill: parent
+                        spacing: 0
+                        Repeater {
+                            model: ["ID", "Название", "Остаток", "Цена за ед.", "Сумма", "Откуда взят", "Примечание"]
+                            Rectangle {
+                                width: index === 0 ? 50 : index === 1 ? 220 : index === 2 ? 90 : index === 3 ? 110 : index === 4 ? 110 : index === 5 ? 220 : 260
+                                height: 34
+                                color: "transparent"
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: modelData
+                                    font.pixelSize: 13
+                                    font.bold: true
+                                }
+                            }
+                        }
+                    }
+                }
                 TableView {
                     id: materialTable
                     Layout.fillWidth: true
@@ -71,19 +120,34 @@ Page {
                     clip: true
                     columnWidthProvider: function(column) {
                         if (column === 0) return 50
-                        if (column === 1) return 300
-                        if (column === 2) return 100
-                        if (column === 3) return 120
-                        return 120
+                        if (column === 1) return 220
+                        if (column === 2) return 90
+                        if (column === 3) return 110
+                        if (column === 4) return 110
+                        if (column === 5) return 220
+                        return 260
                     }
                     delegate: Rectangle {
-                        implicitHeight: 30
+                        implicitHeight: 34
                         border.color: "#ddd"
-                        color: row % 2 ? "#f9f9f9" : "white"
+                        color: materialsTab.selectedMaterialRow === row ? "#b3d9ff" : (row % 2 ? "#f9f9f9" : "white")
                         Text {
-                            anchors.centerIn: parent
+                            anchors.fill: parent
+                            anchors.margins: 6
                             text: display
                             font.pixelSize: 14
+                            verticalAlignment: Text.AlignVCenter
+                            elide: Text.ElideRight
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            onClicked: {
+                                materialsTab.selectedMaterialRow = row
+                                var item = materialModel.get(row)
+                                materialsTab.selectedMaterialId = item.id || -1
+                                materialsTab.selectedMaterialName = item.name || ""
+                                materialsTab.selectedMaterialQty = item.quantity || 0
+                            }
                         }
                     }
                 }
@@ -94,8 +158,8 @@ Page {
                 id: manualAddDialog
                 title: "Добавить материал вручную"
                 standardButtons: Dialog.Ok | Dialog.Cancel
-                width: 400
-                height: 300
+                width: 460
+                height: 420
                 ColumnLayout {
                     anchors.fill: parent
                     spacing: 10
@@ -107,15 +171,28 @@ Page {
                     TextField { id: matPrice; Layout.fillWidth: true; validator: DoubleValidator { bottom: 0.01 } }
                     Label { text: "Количество:" }
                     TextField { id: matQty; Layout.fillWidth: true; validator: DoubleValidator { bottom: 0.01 } }
+                    Label { text: "Откуда взят:" }
+                    TextField { id: matSource; Layout.fillWidth: true; placeholderText: "Поставщик, сайт или ссылка" }
+                    Label { text: "Примечание:" }
+                    TextField { id: matNote; Layout.fillWidth: true; placeholderText: "Дополнительная информация" }
                 }
                 onAccepted: {
                     if (matName.text && matPrice.text && matQty.text) {
-                        backend.addMaterial(matName.text, matUnit.text, parseFloat(matPrice.text), parseFloat(matQty.text))
+                        backend.addMaterial(
+                            matName.text,
+                            matUnit.text,
+                            parseFloat(matPrice.text),
+                            parseFloat(matQty.text),
+                            matSource.text,
+                            matNote.text
+                        )
                         materialModel.refresh()
                         matName.clear()
                         matUnit.text = "шт"
                         matPrice.clear()
                         matQty.clear()
+                        matSource.clear()
+                        matNote.clear()
                     }
                 }
             }
@@ -169,8 +246,92 @@ Page {
                     if (materialCombo.currentValue && newQty.text) {
                         backend.adjustInventory(materialCombo.currentValue, parseFloat(newQty.text), reason.text)
                         materialModel.refresh()
+                        materialsTab.selectedMaterialRow = -1
+                        materialsTab.selectedMaterialId = -1
+                        materialsTab.selectedMaterialName = ""
+                        materialsTab.selectedMaterialQty = 0
                         newQty.clear()
                         reason.clear()
+                    }
+                }
+            }
+
+            Dialog {
+                id: editQtyDialog
+                title: "Изменить количество"
+                standardButtons: Dialog.Ok | Dialog.Cancel
+                width: 420
+                height: 260
+
+                ColumnLayout {
+                    anchors.fill: parent
+                    spacing: 10
+                    Label { text: "Материал: " + materialsTab.selectedMaterialName }
+                    Label { text: "Текущий остаток: " + materialsTab.selectedMaterialQty.toFixed(2) }
+                    Label { text: "Новый остаток:" }
+                    TextField {
+                        id: editQtyField
+                        Layout.fillWidth: true
+                        validator: DoubleValidator { bottom: 0 }
+                    }
+                    Label { text: "Причина изменения:" }
+                    TextField {
+                        id: editReasonField
+                        Layout.fillWidth: true
+                        placeholderText: "Например: пересчёт остатков"
+                    }
+                }
+
+                onAccepted: {
+                    if (materialsTab.selectedMaterialId > 0 && editQtyField.text) {
+                        backend.adjustInventory(
+                            materialsTab.selectedMaterialId,
+                            parseFloat(editQtyField.text),
+                            editReasonField.text
+                        )
+                        materialModel.refresh()
+                        materialsTab.selectedMaterialRow = -1
+                        materialsTab.selectedMaterialId = -1
+                        materialsTab.selectedMaterialName = ""
+                        materialsTab.selectedMaterialQty = 0
+                        editQtyField.clear()
+                        editReasonField.clear()
+                    }
+                }
+            }
+
+            Dialog {
+                id: deleteMaterialDialog
+                title: "Удалить материал со склада"
+                standardButtons: Dialog.Yes | Dialog.No
+                width: 420
+                height: 220
+
+                ColumnLayout {
+                    anchors.fill: parent
+                    spacing: 10
+                    Label {
+                        Layout.fillWidth: true
+                        wrapMode: Text.WordWrap
+                        text: "Удалить со склада материал '" + materialsTab.selectedMaterialName + "'?\nОстаток будет установлен в 0."
+                    }
+                    Label { text: "Причина (необязательно):" }
+                    TextField {
+                        id: deleteReasonField
+                        Layout.fillWidth: true
+                        placeholderText: "Например: списание"
+                    }
+                }
+
+                onAccepted: {
+                    if (materialsTab.selectedMaterialId > 0) {
+                        backend.adjustInventory(materialsTab.selectedMaterialId, 0, deleteReasonField.text)
+                        materialModel.refresh()
+                        materialsTab.selectedMaterialRow = -1
+                        materialsTab.selectedMaterialId = -1
+                        materialsTab.selectedMaterialName = ""
+                        materialsTab.selectedMaterialQty = 0
+                        deleteReasonField.clear()
                     }
                 }
             }
