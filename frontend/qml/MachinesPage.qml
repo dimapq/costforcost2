@@ -29,91 +29,308 @@ Page {
 
             InProgressModel { id: inProgressModel }
 
-            ColumnLayout {
+            SplitView {
                 anchors.fill: parent
-                anchors.margins: 10
-                spacing: 10
+                orientation: Qt.Horizontal
 
-                RowLayout {
-                    Layout.fillWidth: true
-                    Button {
-                        text: "Обновить"
-                        onClicked: inProgressModel.refresh()
-                    }
-                }
+                // ЛЕВАЯ ПАНЕЛЬ: Список станков в процессе
+                Item {
+                    SplitView.preferredWidth: 400
+                    SplitView.minimumWidth: 300
 
-                // Заголовок таблицы
-                Rectangle {
-                    Layout.fillWidth: true
-                    height: 30
-                    color: "#e8e8e8"
-                    RowLayout {
+                    ColumnLayout {
                         anchors.fill: parent
-                        spacing: 0
-                        Repeater {
-                            model: ["ID", "Модель", "Дата начала", "Примечание"]
-                            Rectangle {
-                                width: index === 0 ? 50 : index === 1 ? 200 : index === 2 ? 150 : 150
-                                height: 30
-                                border.color: "#ccc"
-                                color: "transparent"
-                                Text {
-                                    anchors.centerIn: parent
-                                    text: modelData
-                                    font.pixelSize: 13
-                                    font.bold: true
+                        anchors.margins: 10
+                        spacing: 10
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Label {
+                                text: "Станки в производстве"
+                                font.pixelSize: 16
+                                font.bold: true
+                            }
+                            Item { Layout.fillWidth: true }
+                            Button {
+                                text: "Обновить"
+                                onClicked: {
+                                    inProgressModel.refresh()
+                                    if (tab1Root.selectedInProgressId > 0) {
+                                        materialsCheckList.loadMaterialsCheck(tab1Root.selectedInProgressId)
+                                    }
                                 }
                             }
                         }
-                    }
-                }
 
-                TableView {
-                    id: inProgressTable
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    model: inProgressModel
-                    clip: true
-                    columnWidthProvider: function(column) {
-                        if (column === 0) return 50
-                        if (column === 1) return 200
-                        if (column === 2) return 150
-                        return 150
-                    }
-                    
-                    delegate: Rectangle {
-                        implicitHeight: 35
-                        border.color: "#ddd"
-                        color: {
-                            if (tab1Root.selectedRow === row) return "#b3d9ff"
-                            return row % 2 ? "#f9f9f9" : "white"
+                        // Заголовок таблицы
+                        Rectangle {
+                            Layout.fillWidth: true
+                            height: 30
+                            color: "#e8e8e8"
+                            RowLayout {
+                                anchors.fill: parent
+                                spacing: 0
+                                Repeater {
+                                    model: ["ID", "Модель", "Дата начала", "Статус"]
+                                    Rectangle {
+                                        width: index === 0 ? 50 : index === 1 ? 180 : index === 2 ? 120 : 50
+                                        height: 30
+                                        border.color: "#ccc"
+                                        color: "transparent"
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: modelData
+                                            font.pixelSize: 13
+                                            font.bold: true
+                                        }
+                                    }
+                                }
+                            }
                         }
-                        
-                        Text {
-                            anchors.centerIn: parent
-                            text: display
-                            font.pixelSize: 14
-                            color: "black"
+
+                        TableView {
+                            id: inProgressTable
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            model: inProgressModel
+                            clip: true
+                            columnWidthProvider: function(column) {
+                                if (column === 0) return 50
+                                if (column === 1) return 180
+                                if (column === 2) return 120
+                                return 50
+                            }
+                            
+                            delegate: Rectangle {
+                                implicitHeight: 35
+                                border.color: "#ddd"
+                                color: {
+                                    if (tab1Root.selectedRow === row) return "#b3d9ff"
+                                    return row % 2 ? "#f9f9f9" : "white"
+                                }
+                                
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: display
+                                    font.pixelSize: 14
+                                    color: "black"
+                                }
+                                
+                                MouseArea {
+                                    anchors.fill: parent
+                                    onClicked: {
+                                        tab1Root.selectedRow = row
+                                        var item = inProgressModel.get(row)
+                                        tab1Root.selectedInProgressId = item.id
+                                        materialsCheckList.loadMaterialsCheck(item.id)
+                                    }
+                                }
+                            }
                         }
-                        
-                        MouseArea {
-                            anchors.fill: parent
-                            onClicked: {
-                                tab1Root.selectedRow = row
-                                var item = inProgressModel.get(row)
-                                tab1Root.selectedInProgressId = item.id
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Button {
+                                text: "Завершить производство"
+                                enabled: tab1Root.selectedInProgressId > 0 && materialsCheckList.allMaterialsAvailable
+                                highlighted: tab1Root.selectedInProgressId > 0 && materialsCheckList.allMaterialsAvailable
+                                onClicked: completeDialog.open()
+                            }
+                            Label {
+                                visible: tab1Root.selectedInProgressId > 0 && !materialsCheckList.allMaterialsAvailable
+                                text: "⚠ Недостаточно материалов"
+                                color: "#d9534f"
+                                font.bold: true
                             }
                         }
                     }
                 }
 
-                RowLayout {
-                    Layout.fillWidth: true
-                    Button {
-                        text: "Завершить производство"
-                        enabled: tab1Root.selectedInProgressId > 0
-                        highlighted: tab1Root.selectedInProgressId > 0
-                        onClicked: completeDialog.open()
+                // ПРАВАЯ ПАНЕЛЬ: Проверка материалов
+                Item {
+                    SplitView.fillWidth: true
+                    SplitView.minimumWidth: 450
+
+                    ColumnLayout {
+                        anchors.fill: parent
+                        anchors.margins: 10
+                        spacing: 10
+
+                        Label {
+                            text: tab1Root.selectedInProgressId > 0 ? 
+                                "Требуемые материалы (ID станка: " + tab1Root.selectedInProgressId + ")" : 
+                                "Выберите станок для просмотра материалов"
+                            font.pixelSize: 16
+                            font.bold: true
+                        }
+
+                        // Заголовок таблицы материалов
+                        Rectangle {
+                            Layout.fillWidth: true
+                            height: 35
+                            color: "#e8e8e8"
+                            border.color: "#ccc"
+                            visible: tab1Root.selectedInProgressId > 0
+
+                            Row {
+                                anchors.fill: parent
+                                spacing: 0
+                                Repeater {
+                                    model: ["Материал", "Требуется", "В наличии", "Статус"]
+                                    Rectangle {
+                                        width: index === 0 ? 200 : index === 1 ? 100 : index === 2 ? 100 : 100
+                                        height: 35
+                                        border.width: 0
+                                        color: "transparent"
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: modelData
+                                            font.pixelSize: 13
+                                            font.bold: true
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Список материалов
+                        ScrollView {
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            clip: true
+                            visible: tab1Root.selectedInProgressId > 0
+
+                            ListView {
+                                id: materialsCheckList
+                                model: ListModel { id: materialsCheckModel }
+                                spacing: 0
+
+                                property bool allMaterialsAvailable: true
+
+                                delegate: Rectangle {
+                                    width: materialsCheckList.width
+                                    height: 40
+                                    border.color: "#ddd"
+                                    color: model.available ? "#d4edda" : "#f8d7da"
+
+                                    Row {
+                                        anchors.fill: parent
+                                        spacing: 0
+
+                                        // Материал
+                                        Rectangle {
+                                            width: 200
+                                            height: 40
+                                            color: "transparent"
+                                            Text {
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                anchors.left: parent.left
+                                                anchors.leftMargin: 10
+                                                text: model.material_name
+                                                font.pixelSize: 13
+                                                elide: Text.ElideRight
+                                                width: parent.width - 20
+                                            }
+                                        }
+
+                                        // Требуется
+                                        Rectangle {
+                                            width: 100
+                                            height: 40
+                                            color: "transparent"
+                                            Text {
+                                                anchors.centerIn: parent
+                                                text: model.required.toFixed(2)
+                                                font.pixelSize: 13
+                                                font.bold: true
+                                            }
+                                        }
+
+                                        // В наличии
+                                        Rectangle {
+                                            width: 100
+                                            height: 40
+                                            color: "transparent"
+                                            Text {
+                                                anchors.centerIn: parent
+                                                text: model.in_stock.toFixed(2)
+                                                font.pixelSize: 13
+                                                color: model.available ? "#28a745" : "#dc3545"
+                                                font.bold: true
+                                            }
+                                        }
+
+                                        // Статус
+                                        Rectangle {
+                                            width: 100
+                                            height: 40
+                                            color: "transparent"
+                                            Text {
+                                                anchors.centerIn: parent
+                                                text: model.available ? "✓ OK" : "✗ Мало"
+                                                font.pixelSize: 13
+                                                font.bold: true
+                                                color: model.available ? "#28a745" : "#dc3545"
+                                            }
+                                        }
+                                    }
+                                }
+
+                                function loadMaterialsCheck(finishedGoodId) {
+                                    materialsCheckModel.clear()
+                                    var check = backend.checkMaterialsForMachine(finishedGoodId)
+                                    
+                                    var allAvailable = true
+                                    for (var i = 0; i < check.length; i++) {
+                                        materialsCheckModel.append(check[i])
+                                        if (!check[i].available) {
+                                            allAvailable = false
+                                        }
+                                    }
+                                    materialsCheckList.allMaterialsAvailable = allAvailable
+                                }
+                            }
+                        }
+
+                        Label {
+                            visible: tab1Root.selectedInProgressId > 0 && materialsCheckModel.count === 0
+                            text: "Для этого станка не требуется материалов из спецификации"
+                            color: "#666"
+                            Layout.alignment: Qt.AlignHCenter
+                        }
+
+                        Label {
+                            visible: tab1Root.selectedInProgressId <= 0
+                            text: "Выберите станок в списке слева для просмотра требуемых материалов"
+                            color: "#999"
+                            font.pixelSize: 14
+                            Layout.alignment: Qt.AlignHCenter
+                        }
+
+                        // Информация о недостающих материалах
+                        GroupBox {
+                            Layout.fillWidth: true
+                            visible: tab1Root.selectedInProgressId > 0 && !materialsCheckList.allMaterialsAvailable
+                            title: "⚠ Действия"
+
+                            ColumnLayout {
+                                anchors.fill: parent
+                                spacing: 5
+
+                                Label {
+                                    text: "Недостаточно материалов для завершения производства"
+                                    font.bold: true
+                                    color: "#d9534f"
+                                }
+
+                                Label {
+                                    text: "Пополните склад недостающими материалами на странице 'Склад'"
+                                    wrapMode: Text.WordWrap
+                                    Layout.fillWidth: true
+                                    color: "#666"
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -135,6 +352,7 @@ Page {
                     tab1Root.selectedRow = -1
                     tab1Root.selectedInProgressId = -1
                     inProgressModel.refresh()
+                    materialsCheckModel.clear()
                     invNumberField.clear()
                 }
             }
@@ -354,16 +572,32 @@ Page {
                         RowLayout {
                             Layout.fillWidth: true
                             spacing: 5
+                            
                             Button {
                                 text: "Продать"
                                 enabled: tab2Root.selectedFinishedId > 0
                                 highlighted: tab2Root.selectedFinishedId > 0
                                 onClicked: sellDialog.open()
                             }
+                            
                             Button {
                                 text: "Детали себестоимости"
                                 enabled: tab2Root.selectedFinishedId > 0
                                 onClicked: costDetailsDialog.open()
+                            }
+                            
+                            Item { Layout.fillWidth: true }
+                            
+                            Button {
+                                text: "Разобрать станок"
+                                enabled: tab2Root.selectedFinishedId > 0
+                                onClicked: disassembleDialog.open()
+                            }
+                            
+                            Button {
+                                text: "Удалить"
+                                enabled: tab2Root.selectedFinishedId > 0
+                                onClicked: deleteMachineDialog.open()
                             }
                         }
                     }
@@ -782,15 +1016,145 @@ Page {
                 }
             }
 
+            // ДИАЛОГ РАЗБОРКИ СТАНКА
+            Dialog {
+                id: disassembleDialog
+                title: "Разборка станка"
+                standardButtons: Dialog.Yes | Dialog.No
+                width: 550
+                height: 400
+
+                ColumnLayout {
+                    anchors.fill: parent
+                    spacing: 10
+
+                    Label {
+                        text: "Разобрать станок и вернуть материалы на склад?"
+                        font.bold: true
+                        font.pixelSize: 16
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        height: 1
+                        color: "#ccc"
+                    }
+
+                    Label {
+                        text: "Что произойдёт:"
+                        font.bold: true
+                    }
+
+                    ScrollView {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        clip: true
+
+                        TextArea {
+                            id: disassemblePreviewText
+                            readOnly: true
+                            wrapMode: TextArea.Wrap
+                            font.family: "Courier New"
+                            font.pixelSize: 12
+                            text: "Загрузка..."
+                        }
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        height: 1
+                        color: "#ccc"
+                    }
+
+                    Label {
+                        text: "⚠ Это действие НЕЛЬЗЯ отменить!"
+                        color: "#d9534f"
+                        font.bold: true
+                    }
+                }
+
+                onAboutToShow: {
+                    var preview = backend.getDisassemblePreview(tab2Root.selectedFinishedId)
+                    disassemblePreviewText.text = preview
+                }
+
+                onAccepted: {
+                    if (backend.disassembleMachine(tab2Root.selectedFinishedId)) {
+                        tab2Root.selectedRow = -1
+                        tab2Root.selectedFinishedId = -1
+                        finishedModel.refresh()
+                    }
+                }
+            }
+
+            // ДИАЛОГ УДАЛЕНИЯ СТАНКА
+            Dialog {
+                id: deleteMachineDialog
+                title: "Удаление станка"
+                standardButtons: Dialog.Yes | Dialog.No
+                width: 500
+                height: 250
+
+                ColumnLayout {
+                    anchors.fill: parent
+                    spacing: 15
+
+                    Label {
+                        text: "Удалить станок?"
+                        font.bold: true
+                        font.pixelSize: 16
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        height: 1
+                        color: "#ccc"
+                    }
+
+                    Label {
+                        text: "• Станок будет удалён из базы данных\n" +
+                            "• Материалы НЕ вернутся на склад\n" +
+                            "• История работы по станку будет удалена\n" +
+                            "• Это действие НЕЛЬЗЯ отменить"
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        height: 1
+                        color: "#ccc"
+                    }
+
+                    Label {
+                        text: "⚠ Если вы хотите вернуть материалы на склад, используйте 'Разобрать станок'"
+                        color: "#d9534f"
+                        font.bold: true
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
+                }
+
+                onAccepted: {
+                    if (backend.deleteMachine(tab2Root.selectedFinishedId)) {
+                        tab2Root.selectedRow = -1
+                        tab2Root.selectedFinishedId = -1
+                        finishedModel.refresh()
+                    }
+                }
+            }
+            
             Component.onCompleted: {
                 finishedModel.refresh()
             }
         }
-       // ================= ВКЛАДКА 3: РЕДАКТОР МОДЕЛЕЙ =================
+        
+        // ================= ВКЛАДКА 3: РЕДАКТОР МОДЕЛЕЙ =================
         Item {
             id: tab3Root
             property int selectedMachineId: -1
             property string selectedMachineModel: ""
+            property int selectedSpecRow: -1   // своё свойство для отслеживания строки в спецификации
 
             MachineListModel { id: machineModel }
             MachineSpecModel { id: specModel }
@@ -868,6 +1232,7 @@ Page {
                                     tab3Root.selectedMachineModel = m.model
                                     specModel.setMachineId(m.id)
                                     specModel.refresh()
+                                    tab3Root.selectedSpecRow = -1  // сбрасываем выделение в спецификации
                                 }
                             }
                         }
@@ -887,7 +1252,6 @@ Page {
                         }
                     }
 
-                    // НОВАЯ КНОПКА "Начать производство"
                     Button {
                         Layout.fillWidth: true
                         text: "Начать производство"
@@ -949,28 +1313,26 @@ Page {
                             if (column === 3) return 100
                             return 100
                         }
-                        selectionBehavior: TableView.SelectRows
-                        
+
                         delegate: Rectangle {
                             implicitHeight: 35
                             border.color: "#ddd"
                             color: {
-                                if (specTable.currentRow === row) return "#b3d9ff"
+                                if (tab3Root.selectedSpecRow === row) return "#b3d9ff"
                                 return row % 2 ? "#f9f9f9" : "white"
                             }
-                            
+
                             Text {
                                 anchors.centerIn: parent
                                 text: display
                                 font.pixelSize: 14
                                 color: "black"
                             }
-                            
+
                             MouseArea {
                                 anchors.fill: parent
                                 onClicked: {
-                                    specTable.currentRow = row
-                                    specTable.forceActiveFocus()
+                                    tab3Root.selectedSpecRow = row
                                 }
                             }
                         }
@@ -1044,31 +1406,33 @@ Page {
                         
                         Button {
                             text: "Изменить количество"
-                            enabled: specTable.currentRow >= 0
-                            highlighted: specTable.currentRow >= 0
+                            enabled: tab3Root.selectedSpecRow >= 0
+                            highlighted: tab3Root.selectedSpecRow >= 0
                             onClicked: {
-                                var row = specTable.currentRow
-                                var matId = specModel.getMaterialId(row)
-                                var curQty = specModel.getQuantity(row)
-                                editQtyDialog.materialId = matId
-                                editQtyDialog.currentQty = curQty
-                                editQtyDialog.open()
+                                if (tab3Root.selectedSpecRow >= 0) {
+                                    var matId = specModel.getMaterialId(tab3Root.selectedSpecRow)
+                                    var curQty = specModel.getQuantity(tab3Root.selectedSpecRow)
+                                    editQtyDialog.materialId = matId
+                                    editQtyDialog.currentQty = curQty
+                                    editQtyDialog.open()
+                                }
                             }
                         }
                         
                         Button {
                             text: "Удалить материал"
-                            enabled: specTable.currentRow >= 0
-                            highlighted: specTable.currentRow >= 0
+                            enabled: tab3Root.selectedSpecRow >= 0
+                            highlighted: tab3Root.selectedSpecRow >= 0
                             onClicked: {
-                                var row = specTable.currentRow
-                                var matId = specModel.getMaterialId(row)
-                                if (matId > 0) {
-                                    backend.removeMaterialFromMachine(tab3Root.selectedMachineId, matId)
-                                    specTable.currentRow = -1
-                                    specModel.refresh()
-                                    machineModel.refresh()
-                                    modelCountText.text = "Найдено моделей: " + machineModel.rowCount()
+                                if (tab3Root.selectedSpecRow >= 0) {
+                                    var matId = specModel.getMaterialId(tab3Root.selectedSpecRow)
+                                    if (matId > 0) {
+                                        backend.removeMaterialFromMachine(tab3Root.selectedMachineId, matId)
+                                        tab3Root.selectedSpecRow = -1
+                                        specModel.refresh()
+                                        machineModel.refresh()
+                                        modelCountText.text = "Найдено моделей: " + machineModel.rowCount()
+                                    }
                                 }
                             }
                         }
@@ -1076,7 +1440,7 @@ Page {
                 }
             }
 
-            // ДИАЛОГИ
+            // ДИАЛОГИ (без изменений)
             Dialog {
                 id: addModelDialog
                 title: "Добавить модель станка"
@@ -1122,7 +1486,6 @@ Page {
                 }
             }
 
-            // НОВЫЙ ДИАЛОГ "Начать производство"
             Dialog {
                 id: startProductionDialog
                 title: "Начать производство станка"

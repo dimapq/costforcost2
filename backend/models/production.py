@@ -291,6 +291,102 @@ def set_machine_completed(finished_good_id, inventory_number=None):
             """, (inventory_number, finished_good_id))
             conn.commit()
 
+def complete_machine_with_material_deduction(finished_good_id, inventory_number=None):
+    """
+    Завершает производство станка:
+    - Проверяет, что статус 'in_progress'
+    - Списывает материалы по спецификации модели
+    - Рассчитывает себестоимость (материалы + работа + амортизация)
+    - Обновляет finished_goods (cost_price, status='completed', inventory_number)
+    """
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            # 1. Получаем данные о станке
+            cur.execute("""
+                SELECT machine_id, machine_model
+                FROM finished_goods
+                WHERE id = %s AND status = 'in_progress'
+            """, (finished_good_id,))
+            row = cur.fetchone()
+            if not row:
+                print(f"Станок {finished_good_id} не найден или не в процессе")
+                return False
+            machine_id, model = row
+
+            # 2. Проверяем наличие материалов (исправленный запрос)
+            cur.execute("""
+                SELECT m.name, mm.quantity, COALESCE(inv.quantity, 0) AS available
+                FROM machine_materials mm
+                JOIN materials m ON mm.material_id = m.id
+                LEFT JOIN material_inventory inv ON mm.material_id = inv.material_id
+                WHERE mm.machine_id = %s
+                  AND COALESCE(inv.quantity, 0) < mm.quantity
+            """, (machine_id,))
+            shortages = cur.fetchall()
+            if shortages:
+                print("Недостаточно материалов:")
+                for name, req, avail in shortages:
+                    print(f"  - {name}: требуется {req}, в наличии {avail}")
+                return False
+
+            # 3. Списываем материалы и считаем стоимость материалов
+            material_cost = Decimal('0.00')
+            # Используем последнюю цену (упрощённо)
+            cur.execute("""
+                WITH latest_prices AS (
+                    SELECT DISTINCT ON (material_id) material_id, price_per_unit
+                    FROM purchases
+                    WHERE price_per_unit IS NOT NULL
+                    ORDER BY material_id, purchase_date DESC
+                )
+                SELECT mm.material_id, mm.quantity, lp.price_per_unit
+                FROM machine_materials mm
+                LEFT JOIN latest_prices lp ON mm.material_id = lp.material_id
+                WHERE mm.machine_id = %s
+            """, (machine_id,))
+            for mat_id, qty, price in cur.fetchall():
+                # Списываем с остатков
+                cur.execute("""
+                    UPDATE material_inventory
+                    SET quantity = quantity - %s
+                    WHERE material_id = %s
+                """, (qty, mat_id))
+                # Запись транзакции
+                cur.execute("""
+                    INSERT INTO material_transactions (material_id, quantity_change, transaction_type, reference_id)
+                    VALUES (%s, %s, 'production', %s)
+                """, (mat_id, -qty, finished_good_id))
+                if price:
+                    material_cost += qty * price
+
+            # 4. Учитываем трудозатраты (фактические часы)
+            cur.execute("""
+                SELECT COALESCE(SUM(wl.hours * e.hourly_rate), 0)
+                FROM finished_good_labor fgl
+                JOIN work_logs wl ON fgl.work_log_id = wl.id
+                JOIN employees e ON wl.employee_id = e.id
+                WHERE fgl.finished_good_id = %s
+            """, (finished_good_id,))
+            labor_cost = cur.fetchone()[0] or Decimal('0.00')
+
+            # 5. Амортизация инструментов (если привязана)
+            from backend.models.tools import apply_tool_depreciation_for_production
+            tool_cost = apply_tool_depreciation_for_production(machine_id, 1, finished_good_id)
+
+            total_cost = material_cost + labor_cost + tool_cost
+
+            # 6. Обновляем finished_goods
+            cur.execute("""
+                UPDATE finished_goods
+                SET status = 'completed',
+                    cost_price = %s,
+                    inventory_number = COALESCE(%s, inventory_number)
+                WHERE id = %s
+            """, (total_cost, inventory_number, finished_good_id))
+
+            conn.commit()
+            print(f"Производство станка ID {finished_good_id} завершено. Себестоимость: {total_cost:.2f}")
+            return True
 
 def get_finished_goods_summary():
     """Возвращает суммарную себестоимость готовой продукции на складе."""

@@ -434,16 +434,19 @@ class BackendController(QObject):
             return start_production_gui(machine_id, quantity, notes)
         except Exception as e:
             print(f"Ошибка начала производства: {e}")
+            import traceback
+            traceback.print_exc()
             return False
 
     @Slot(int, str, result=bool)
     def completeMachine(self, finished_good_id, inventory_number):
         try:
-            from backend.models.production import set_machine_completed
-            set_machine_completed(finished_good_id, inventory_number)
-            return True
+            from backend.models.production import complete_machine_with_material_deduction
+            return complete_machine_with_material_deduction(finished_good_id, inventory_number)
         except Exception as e:
             print(f"Ошибка завершения производства: {e}")
+            import traceback
+            traceback.print_exc()
             return False
 
     # ---------- Финансы и аналитика ----------
@@ -963,6 +966,223 @@ class BackendController(QObject):
             import traceback
             traceback.print_exc()
         return False
+
+    @Slot(int, result="QVariantList")
+    def checkMaterialsForMachine(self, finished_good_id):
+        """Проверяет наличие материалов для завершения производства станка."""
+        try:
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    # Получаем machine_id из finished_goods
+                    cur.execute("""
+                        SELECT machine_id FROM finished_goods WHERE id = %s
+                    """, (finished_good_id,))
+                    row = cur.fetchone()
+                    if not row or not row[0]:
+                        return []
+                    
+                    machine_id = row[0]
+                    
+                    # Проверяем материалы
+                    cur.execute("""
+                        SELECT 
+                            m.name,
+                            mm.quantity AS required,
+                            COALESCE(inv.quantity, 0) AS in_stock,
+                            CASE 
+                                WHEN COALESCE(inv.quantity, 0) >= mm.quantity THEN true
+                                ELSE false
+                            END AS available
+                        FROM machine_materials mm
+                        JOIN materials m ON mm.material_id = m.id
+                        LEFT JOIN material_inventory inv ON mm.material_id = inv.material_id
+                        WHERE mm.machine_id = %s
+                        ORDER BY available ASC, m.name
+                    """, (machine_id,))
+                    
+                    rows = cur.fetchall()
+                    
+                    return [
+                        {
+                            "material_name": r[0],
+                            "required": float(r[1]),
+                            "in_stock": float(r[2]),
+                            "available": r[3]
+                        }
+                        for r in rows
+                    ]
+        except Exception as e:
+            print(f"Ошибка проверки материалов: {e}")
+            import traceback
+            traceback.print_exc()
+            return []
+
+    @Slot(int, result=str)
+    def getDisassemblePreview(self, finished_good_id):
+        """Показывает предпросмотр что вернётся на склад при разборке."""
+        try:
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    # Получаем информацию о станке
+                    cur.execute("""
+                        SELECT machine_model, machine_id FROM finished_goods WHERE id = %s
+                    """, (finished_good_id,))
+                    row = cur.fetchone()
+                    if not row:
+                        return "Станок не найден"
+                    
+                    model, machine_id = row
+                    
+                    preview = f"Станок: {model} (ID {finished_good_id})\n\n"
+                    preview += "МАТЕРИАЛЫ, КОТОРЫЕ ВЕРНУТСЯ НА СКЛАД:\n"
+                    preview += "=" * 60 + "\n"
+                    
+                    # Получаем материалы из спецификации
+                    cur.execute("""
+                        SELECT 
+                            m.name,
+                            mm.quantity,
+                            COALESCE(inv.quantity, 0) as current_stock,
+                            (mm.quantity + COALESCE(inv.quantity, 0)) as after_return
+                        FROM machine_materials mm
+                        JOIN materials m ON mm.material_id = m.id
+                        LEFT JOIN material_inventory inv ON mm.material_id = inv.material_id
+                        WHERE mm.machine_id = %s
+                        ORDER BY m.name
+                    """, (machine_id,))
+                    
+                    materials = cur.fetchall()
+                    
+                    if not materials:
+                        preview += "Нет материалов для возврата\n"
+                    else:
+                        preview += f"{'Материал':<35} {'Вернётся':>10} {'Сейчас':>10} {'Станет':>10}\n"
+                        preview += "-" * 60 + "\n"
+                        
+                        for name, qty, current, after in materials:
+                            preview += f"{name:<35} {qty:>10.2f} {current:>10.2f} {after:>10.2f}\n"
+                        
+                        preview += "=" * 60 + "\n"
+                    
+                    # Информация о работе (не вернётся)
+                    cur.execute("""
+                        SELECT SUM(wl.hours * e.hourly_rate)
+                        FROM work_logs wl
+                        JOIN employees e ON wl.employee_id = e.id
+                        JOIN finished_good_labor fgl ON wl.id = fgl.work_log_id
+                        WHERE fgl.finished_good_id = %s
+                    """, (finished_good_id,))
+                    
+                    labor_cost = cur.fetchone()[0] or Decimal('0')
+                    
+                    if labor_cost > 0:
+                        preview += f"\nВНИМАНИЕ: Затраты на работу ({labor_cost:.2f} ₽) НЕ возмещаются!\n"
+                    
+                    preview += "\nСтанок будет удалён из базы данных."
+                    
+                    return preview
+                    
+        except Exception as e:
+            print(f"Ошибка предпросмотра разборки: {e}")
+            return f"Ошибка: {str(e)}"
+
+    @Slot(int, result=bool)
+    def disassembleMachine(self, finished_good_id):
+        """Разбирает станок и возвращает материалы на склад."""
+        try:
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    # Получаем machine_id
+                    cur.execute("""
+                        SELECT machine_id FROM finished_goods WHERE id = %s AND status = 'completed'
+                    """, (finished_good_id,))
+                    row = cur.fetchone()
+                    if not row:
+                        print("Станок не найден или уже продан")
+                        return False
+                    
+                    machine_id = row[0]
+                    
+                    # Получаем материалы из спецификации
+                    cur.execute("""
+                        SELECT material_id, quantity
+                        FROM machine_materials
+                        WHERE machine_id = %s
+                    """, (machine_id,))
+                    materials = cur.fetchall()
+                    
+                    # Возвращаем материалы на склад
+                    for material_id, quantity in materials:
+                        cur.execute("""
+                            INSERT INTO material_inventory (material_id, quantity)
+                            VALUES (%s, %s)
+                            ON CONFLICT (material_id) 
+                            DO UPDATE SET quantity = material_inventory.quantity + EXCLUDED.quantity
+                        """, (material_id, quantity))
+                        
+                        # Добавляем транзакцию
+                        cur.execute("""
+                            INSERT INTO material_transactions (material_id, quantity_change, transaction_type, reference_id)
+                            VALUES (%s, %s, 'disassembly', %s)
+                        """, (material_id, quantity, finished_good_id))
+                    
+                    # Удаляем связи с амортизацией инструментов
+                    cur.execute("DELETE FROM tool_depreciation WHERE finished_good_id = %s", (finished_good_id,))
+                    
+                    # Удаляем связи с работой
+                    cur.execute("DELETE FROM finished_good_labor WHERE finished_good_id = %s", (finished_good_id,))
+                    
+                    # Удаляем станок
+                    cur.execute("DELETE FROM finished_goods WHERE id = %s", (finished_good_id,))
+                    
+                    conn.commit()
+                    print(f"Станок ID {finished_good_id} разобран, материалы возвращены на склад")
+                    
+            return True
+        except Exception as e:
+            print(f"Ошибка разборки станка: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
+    @Slot(int, result=bool)
+    def deleteMachine(self, finished_good_id):
+        """Удаляет станок БЕЗ возврата материалов."""
+        try:
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    # Проверяем что станок на складе
+                    cur.execute("""
+                        SELECT status FROM finished_goods WHERE id = %s
+                    """, (finished_good_id,))
+                    row = cur.fetchone()
+                    if not row:
+                        print("Станок не найден")
+                        return False
+                    
+                    if row[0] == 'sold':
+                        print("Нельзя удалить проданный станок")
+                        return False
+                    
+                    # Удаляем связи с работой
+                    cur.execute("""
+                        DELETE FROM finished_good_labor WHERE finished_good_id = %s
+                    """, (finished_good_id,))
+                    
+                    # Удаляем станок
+                    cur.execute("""
+                        DELETE FROM finished_goods WHERE id = %s
+                    """, (finished_good_id,))
+                    
+                    conn.commit()
+                    print(f"Станок ID {finished_good_id} удалён")
+                    
+            return True
+        except Exception as e:
+            print(f"Ошибка удаления станка: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
 
     @Slot(str, str)
     def exportReportToExcel(self, start_date_str, end_date_str):
