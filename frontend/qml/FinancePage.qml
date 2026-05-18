@@ -5,310 +5,316 @@ import QtQuick.Layouts
 Page {
     title: "Финансы и аналитика"
 
-    ColumnLayout {
+    ScrollView {
+        id: scrollView
         anchors.fill: parent
-        anchors.margins: 20
-        spacing: 20
+        clip: true
+        padding: 20
+        ScrollBar.vertical.policy: ScrollBar.AsNeeded
 
-        GroupBox {
-            title: "Ключевые показатели"
-            Layout.fillWidth: true
-            Layout.preferredHeight: 120
+        ColumnLayout {
+            width: scrollView.availableWidth
+            spacing: 20
 
-            RowLayout {
-                anchors.fill: parent
-                spacing: 20
-
-                Frame {
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    ColumnLayout {
-                        anchors.centerIn: parent
-                        Label { text: "Общие активы"; font.bold: true }
-                        Label { id: totalAssetsLabel; text: "0.00 руб."; font.pixelSize: 18 }
-                    }
-                }
-                Frame {
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    ColumnLayout {
-                        anchors.centerIn: parent
-                        Label { text: "Выручка (месяц)"; font.bold: true }
-                        Label { id: revenueLabel; text: "0.00 руб."; font.pixelSize: 18 }
-                    }
-                }
-                Frame {
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    ColumnLayout {
-                        anchors.centerIn: parent
-                        Label { text: "Прибыль (месяц)"; font.bold: true }
-                        Label { id: profitLabel; text: "0.00 руб."; font.pixelSize: 18 }
-                    }
-                }
-                Frame {
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    ColumnLayout {
-                        anchors.centerIn: parent
-                        Label { text: "Рентабельность"; font.bold: true }
-                        Label { id: marginLabel; text: "0.0 %"; font.pixelSize: 18 }
-                    }
-                }
-            }
-        }
-
-        GroupBox {
-            title: "Отчёт о прибылях и убытках"
-            Layout.fillWidth: true
-            Layout.preferredHeight: 320
-
-            ColumnLayout {
-                anchors.fill: parent
-                spacing: 10
+            GroupBox {
+                title: "Ключевые показатели"
+                Layout.fillWidth: true
+                Layout.preferredHeight: 120
 
                 RowLayout {
-                    Layout.fillWidth: true
-                    Label { text: "Период:" }
-                    TextField { id: startDateField; placeholderText: "ГГГГ-ММ-ДД"; Layout.preferredWidth: 120 }
-                    Label { text: "–" }
-                    TextField { id: endDateField; placeholderText: "ГГГГ-ММ-ДД"; Layout.preferredWidth: 120 }
-                    Button {
-                        text: "Обновить"
-                        onClicked: {
-                            var report = backend.getProfitLossReport(startDateField.text, endDateField.text)
-                            var lines = report.split("\n")
-                            var model = []
-                            for (var i = 0; i < lines.length; i++) if (lines[i].trim() !== "") model.push({"text": lines[i]})
-                            reportList.model = model
-                            updateDashboard()
+                    anchors.fill: parent
+                    spacing: 20
+
+                    Frame {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        ColumnLayout {
+                            anchors.centerIn: parent
+                            Label { text: "Общие активы"; font.bold: true }
+                            Label { id: totalAssetsLabel; text: "0.00 руб."; font.pixelSize: 18 }
                         }
                     }
-                    Button { text: "Экспорт в Excel"; onClicked: backend.exportReportToExcel(startDateField.text, endDateField.text) }
-                }
-
-                ListView {
-                    id: reportList
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    clip: true
-                    model: []
-                    delegate: Text { text: modelData.text; font.family: "Courier New"; font.pixelSize: 12 }
-                }
-            }
-        }
-
-
-        GroupBox {
-            title: "Расчёт налогов"
-            Layout.fillWidth: true
-            Layout.preferredHeight: 215
-
-            ColumnLayout {
-                anchors.fill: parent
-                spacing: 8
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    Label { text: "Период:" }
-                    TextField { id: taxStartField; Layout.preferredWidth: 120; placeholderText: "ГГГГ-ММ-ДД" }
-                    Label { text: "—" }
-                    TextField { id: taxEndField; Layout.preferredWidth: 120; placeholderText: "ГГГГ-ММ-ДД" }
-                    Label { text: "Ставка %:" }
-                    TextField { id: taxRateField; Layout.preferredWidth: 80; text: "6"; validator: DoubleValidator { bottom: 0 } }
-                    Button { text: "Рассчитать"; onClicked: updateTaxReport() }
-                    Button { text: "Отметить оплату"; onClicked: saveTaxPayment() }
-                }
-
-                Rectangle {
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    color: "#f8faf7"
-                    border.color: "#d6dfd2"
-                    radius: 4
-
-                    GridLayout {
-                        anchors.fill: parent
-                        anchors.margins: 10
-                        columns: 4
-                        rowSpacing: 6
-                        columnSpacing: 12
-
-                        Label { text: "Доходы без налички:"; font.bold: true }
-                        Label { id: taxIncomeLabel; text: "0.00 руб." }
-                        Label { text: "Расходы без налички:"; font.bold: true }
-                        Label { id: taxExpenseLabel; text: "0.00 руб." }
-
-                        Label { text: "Налоговая база:"; font.bold: true }
-                        Label { id: taxBaseLabel; text: "0.00 руб." }
-                        Label { text: "Налог:"; font.bold: true }
-                        Label { id: taxAmountLabel; text: "0.00 руб."; color: "#9b2f2f"; font.bold: true }
-
-                        Label { text: "Исключено наличкой:"; font.bold: true }
-                        Label { id: taxCashExcludedLabel; text: "0.00 руб."; Layout.columnSpan: 3 }
-
-                        Label { text: "Последняя оплата:"; font.bold: true }
-                        Label { id: taxLastPaymentLabel; text: "Налог ещё не отмечался как уплаченный"; Layout.columnSpan: 3 }
-                    }
-                }
-            }
-        }
-
-        GroupBox {
-            title: "Косвенные расходы"
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-
-            ColumnLayout {
-                anchors.fill: parent
-                spacing: 8
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    TextField { id: indirectMonthField; Layout.preferredWidth: 120; placeholderText: "ГГГГ-ММ" }
-                    Button {
-                        text: "Пересчитать за месяц"
-                        onClicked: {
-                            if (indirectMonthField.text) {
-                                backend.recalculateIndirectExpenses(indirectMonthField.text)
-                                reloadIndirect()
-                            }
+                    Frame {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        ColumnLayout {
+                            anchors.centerIn: parent
+                            Label { text: "Выручка (месяц)"; font.bold: true }
+                            Label { id: revenueLabel; text: "0.00 руб."; font.pixelSize: 18 }
                         }
                     }
-                    Button { text: "Обновить"; onClicked: reloadIndirect() }
+                    Frame {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        ColumnLayout {
+                            anchors.centerIn: parent
+                            Label { text: "Прибыль (месяц)"; font.bold: true }
+                            Label { id: profitLabel; text: "0.00 руб."; font.pixelSize: 18 }
+                        }
+                    }
+                    Frame {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        ColumnLayout {
+                            anchors.centerIn: parent
+                            Label { text: "Рентабельность"; font.bold: true }
+                            Label { id: marginLabel; text: "0.0 %"; font.pixelSize: 18 }
+                        }
+                    }
                 }
+            }
 
-                RowLayout {
-                    Layout.fillWidth: true
-                    Label { text: "Период:" }
-                    TextField { id: indirectFromField; Layout.preferredWidth: 120; placeholderText: "ГГГГ-ММ-ДД" }
-                    Label { text: "—" }
-                    TextField { id: indirectToField; Layout.preferredWidth: 120; placeholderText: "ГГГГ-ММ-ДД" }
-                    Button { text: "Показать за период"; onClicked: reloadIndirect() }
-                }
+            GroupBox {
+                title: "Отчёт о прибылях и убытках"
+                Layout.fillWidth: true
+                Layout.preferredHeight: 320
 
-                Rectangle {
-                    Layout.fillWidth: true
-                    height: 58
-                    color: "#fff7e6"
-                    border.color: "#e2c27a"
-                    radius: 4
+                ColumnLayout {
+                    anchors.fill: parent
+                    spacing: 10
 
                     RowLayout {
-                        anchors.fill: parent
-                        anchors.margins: 10
-                        spacing: 18
-
-                        Label {
-                            text: "Простой по косвенным расходам"
-                            font.bold: true
-                            color: "#7a4b00"
-                        }
-
-                        Label {
-                            id: indirectIdleDaysLabel
-                            text: "Дней простоя: 0"
-                            font.bold: true
-                        }
-
-                        Label {
-                            id: indirectIdleAmountLabel
-                            text: "Набежало: 0.00 руб."
-                            font.bold: true
-                            color: "#9b2f2f"
-                        }
-
-                        Label {
-                            id: indirectIdlePeriodLabel
-                            Layout.fillWidth: true
-                            text: ""
-                            color: "#666"
-                            elide: Text.ElideRight
-                        }
-                    }
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    TextField { id: indirectName; Layout.preferredWidth: 180; placeholderText: "Категория" }
-                    TextField { id: indirectAmount; Layout.preferredWidth: 130; placeholderText: "Сумма/мес"; validator: DoubleValidator { bottom: 0.01 } }
-                    CheckBox { id: indirectActive; text: "Активна"; checked: true }
-                    TextField { id: indirectNote; Layout.fillWidth: true; placeholderText: "Примечание" }
-                    Button {
-                        text: "Добавить"
-                        onClicked: {
-                            if (indirectName.text && indirectAmount.text) {
-                                backend.addIndirectCategory(indirectName.text, parseFloat(indirectAmount.text), indirectActive.checked, indirectNote.text)
-                                indirectName.clear(); indirectAmount.clear(); indirectNote.clear()
-                                reloadIndirect()
+                        Layout.fillWidth: true
+                        Label { text: "Период:" }
+                        TextField { id: startDateField; placeholderText: "ГГГГ-ММ-ДД"; Layout.preferredWidth: 120 }
+                        Label { text: "–" }
+                        TextField { id: endDateField; placeholderText: "ГГГГ-ММ-ДД"; Layout.preferredWidth: 120 }
+                        Button {
+                            text: "Обновить"
+                            onClicked: {
+                                var report = backend.getProfitLossReport(startDateField.text, endDateField.text)
+                                var lines = report.split("\n")
+                                var model = []
+                                for (var i = 0; i < lines.length; i++) if (lines[i].trim() !== "") model.push({"text": lines[i]})
+                                reportList.model = model
+                                updateDashboard()
                             }
                         }
+                        Button { text: "Экспорт в Excel"; onClicked: backend.exportReportToExcel(startDateField.text, endDateField.text) }
+                    }
+
+                    ListView {
+                        id: reportList
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        clip: true
+                        model: []
+                        delegate: Text { text: modelData.text; font.family: "Courier New"; font.pixelSize: 12 }
                     }
                 }
+            }
 
-                Label { text: "Категории"; font.bold: true }
-                ListView {
-                    id: indirectCategoriesView
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 130
-                    clip: true
-                    model: ListModel { id: indirectCategoriesModel }
-                    delegate: Rectangle {
-                        width: indirectCategoriesView.width
-                        height: 32
-                        color: index % 2 ? "#f9f9f9" : "white"
-                        RowLayout {
+            GroupBox {
+                title: "Расчёт налогов"
+                Layout.fillWidth: true
+                Layout.preferredHeight: 215
+
+                ColumnLayout {
+                    anchors.fill: parent
+                    spacing: 8
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Label { text: "Период:" }
+                        TextField { id: taxStartField; Layout.preferredWidth: 120; placeholderText: "ГГГГ-ММ-ДД" }
+                        Label { text: "—" }
+                        TextField { id: taxEndField; Layout.preferredWidth: 120; placeholderText: "ГГГГ-ММ-ДД" }
+                        Label { text: "Ставка %:" }
+                        TextField { id: taxRateField; Layout.preferredWidth: 80; text: "6"; validator: DoubleValidator { bottom: 0 } }
+                        Button { text: "Рассчитать"; onClicked: updateTaxReport() }
+                        Button { text: "Отметить оплату"; onClicked: saveTaxPayment() }
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        color: "#f8faf7"
+                        border.color: "#d6dfd2"
+                        radius: 4
+
+                        GridLayout {
                             anchors.fill: parent
-                            Text { Layout.preferredWidth: 200; text: model.name }
-                            Text { Layout.preferredWidth: 120; text: Number(model.monthly_amount).toFixed(2) + " ₽" }
-                            Text { Layout.preferredWidth: 90; text: model.is_active ? "Да" : "Нет" }
-                            Text { Layout.fillWidth: true; text: model.notes || "-"; elide: Text.ElideRight }
-                            Button {
-                                text: "Изменить"
-                                onClicked: {
-                                    editCategoryId = model.id
-                                    editCategoryName.text = model.name
-                                    editCategoryAmount.text = Number(model.monthly_amount).toFixed(2)
-                                    editCategoryActive.checked = model.is_active
-                                    editCategoryNote.text = model.notes || ""
-                                    editCategoryDialog.open()
+                            anchors.margins: 10
+                            columns: 4
+                            rowSpacing: 6
+                            columnSpacing: 12
+
+                            Label { text: "Доходы без налички:"; font.bold: true }
+                            Label { id: taxIncomeLabel; text: "0.00 руб." }
+                            Label { text: "Расходы без налички:"; font.bold: true }
+                            Label { id: taxExpenseLabel; text: "0.00 руб." }
+
+                            Label { text: "Налоговая база:"; font.bold: true }
+                            Label { id: taxBaseLabel; text: "0.00 руб." }
+                            Label { text: "Налог:"; font.bold: true }
+                            Label { id: taxAmountLabel; text: "0.00 руб."; color: "#9b2f2f"; font.bold: true }
+
+                            Label { text: "Исключено наличкой:"; font.bold: true }
+                            Label { id: taxCashExcludedLabel; text: "0.00 руб."; Layout.columnSpan: 3 }
+
+                            Label { text: "Последняя оплата:"; font.bold: true }
+                            Label { id: taxLastPaymentLabel; text: "Налог ещё не отмечался как уплаченный"; Layout.columnSpan: 3 }
+                        }
+                    }
+                }
+            }
+
+            GroupBox {
+                title: "Косвенные расходы"
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+
+                ColumnLayout {
+                    anchors.fill: parent
+                    spacing: 8
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        TextField { id: indirectMonthField; Layout.preferredWidth: 120; placeholderText: "ГГГГ-ММ" }
+                        Button {
+                            text: "Пересчитать за месяц"
+                            onClicked: {
+                                if (indirectMonthField.text) {
+                                    backend.recalculateIndirectExpenses(indirectMonthField.text)
+                                    reloadIndirect()
                                 }
                             }
-                            Button { text: "Удалить"; onClicked: { backend.deleteIndirectCategory(model.id); reloadIndirect() } }
                         }
+                        Button { text: "Обновить"; onClicked: reloadIndirect() }
                     }
-                }
 
-                Label { text: "Распределение по станкам"; font.bold: true }
-                Rectangle {
-                    Layout.fillWidth: true
-                    height: 32
-                    color: "#e8e8e8"
-                    border.color: "#ccc"
                     RowLayout {
-                        anchors.fill: parent
-                        Text { Layout.preferredWidth: 110; text: "Дата"; font.bold: true; horizontalAlignment: Text.AlignHCenter }
-                        Text { Layout.preferredWidth: 180; text: "Категория"; font.bold: true; horizontalAlignment: Text.AlignHCenter }
-                        Text { Layout.fillWidth: true; text: "Модель станка"; font.bold: true; horizontalAlignment: Text.AlignHCenter }
-                        Text { Layout.preferredWidth: 120; text: "Сумма"; font.bold: true; horizontalAlignment: Text.AlignHCenter }
+                        Layout.fillWidth: true
+                        Label { text: "Период:" }
+                        TextField { id: indirectFromField; Layout.preferredWidth: 120; placeholderText: "ГГГГ-ММ-ДД" }
+                        Label { text: "—" }
+                        TextField { id: indirectToField; Layout.preferredWidth: 120; placeholderText: "ГГГГ-ММ-ДД" }
+                        Button { text: "Показать за период"; onClicked: reloadIndirect() }
                     }
-                }
-                ListView {
-                    id: indirectAllocView
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    clip: true
-                    model: ListModel { id: indirectAllocModel }
-                    delegate: Rectangle {
-                        width: indirectAllocView.width
-                        height: 30
-                        color: index % 2 ? "#f9f9f9" : "white"
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        height: 58
+                        color: "#fff7e6"
+                        border.color: "#e2c27a"
+                        radius: 4
+
                         RowLayout {
                             anchors.fill: parent
-                            Text { Layout.preferredWidth: 110; text: model.date }
-                            Text { Layout.preferredWidth: 180; text: model.category; elide: Text.ElideRight }
-                            Text { Layout.fillWidth: true; text: model.machine_model; elide: Text.ElideRight }
-                            Text { Layout.preferredWidth: 120; text: Number(model.amount).toFixed(2) + " ₽" }
+                            anchors.margins: 10
+                            spacing: 18
+
+                            Label {
+                                text: "Простой по косвенным расходам"
+                                font.bold: true
+                                color: "#7a4b00"
+                            }
+
+                            Label {
+                                id: indirectIdleDaysLabel
+                                text: "Дней простоя: 0"
+                                font.bold: true
+                            }
+
+                            Label {
+                                id: indirectIdleAmountLabel
+                                text: "Набежало: 0.00 руб."
+                                font.bold: true
+                                color: "#9b2f2f"
+                            }
+
+                            Label {
+                                id: indirectIdlePeriodLabel
+                                Layout.fillWidth: true
+                                text: ""
+                                color: "#666"
+                                elide: Text.ElideRight
+                            }
+                        }
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        TextField { id: indirectName; Layout.preferredWidth: 180; placeholderText: "Категория" }
+                        TextField { id: indirectAmount; Layout.preferredWidth: 130; placeholderText: "Сумма/мес"; validator: DoubleValidator { bottom: 0.01 } }
+                        CheckBox { id: indirectActive; text: "Активна"; checked: true }
+                        TextField { id: indirectNote; Layout.fillWidth: true; placeholderText: "Примечание" }
+                        Button {
+                            text: "Добавить"
+                            onClicked: {
+                                if (indirectName.text && indirectAmount.text) {
+                                    backend.addIndirectCategory(indirectName.text, parseFloat(indirectAmount.text), indirectActive.checked, indirectNote.text)
+                                    indirectName.clear(); indirectAmount.clear(); indirectNote.clear()
+                                    reloadIndirect()
+                                }
+                            }
+                        }
+                    }
+
+                    Label { text: "Категории"; font.bold: true }
+                    ListView {
+                        id: indirectCategoriesView
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 130
+                        clip: true
+                        model: ListModel { id: indirectCategoriesModel }
+                        delegate: Rectangle {
+                            width: indirectCategoriesView.width
+                            height: 32
+                            color: index % 2 ? "#f9f9f9" : "white"
+                            RowLayout {
+                                anchors.fill: parent
+                                Text { Layout.preferredWidth: 200; text: model.name }
+                                Text { Layout.preferredWidth: 120; text: Number(model.monthly_amount).toFixed(2) + " ₽" }
+                                Text { Layout.preferredWidth: 90; text: model.is_active ? "Да" : "Нет" }
+                                Text { Layout.fillWidth: true; text: model.notes || "-"; elide: Text.ElideRight }
+                                Button {
+                                    text: "Изменить"
+                                    onClicked: {
+                                        editCategoryId = model.id
+                                        editCategoryName.text = model.name
+                                        editCategoryAmount.text = Number(model.monthly_amount).toFixed(2)
+                                        editCategoryActive.checked = model.is_active
+                                        editCategoryNote.text = model.notes || ""
+                                        editCategoryDialog.open()
+                                    }
+                                }
+                                Button { text: "Удалить"; onClicked: { backend.deleteIndirectCategory(model.id); reloadIndirect() } }
+                            }
+                        }
+                    }
+
+                    Label { text: "Распределение по станкам"; font.bold: true }
+                    Rectangle {
+                        Layout.fillWidth: true
+                        height: 32
+                        color: "#e8e8e8"
+                        border.color: "#ccc"
+                        RowLayout {
+                            anchors.fill: parent
+                            Text { Layout.preferredWidth: 110; text: "Дата"; font.bold: true; horizontalAlignment: Text.AlignHCenter }
+                            Text { Layout.preferredWidth: 180; text: "Категория"; font.bold: true; horizontalAlignment: Text.AlignHCenter }
+                            Text { Layout.fillWidth: true; text: "Модель станка"; font.bold: true; horizontalAlignment: Text.AlignHCenter }
+                            Text { Layout.preferredWidth: 120; text: "Сумма"; font.bold: true; horizontalAlignment: Text.AlignHCenter }
+                        }
+                    }
+                    ListView {
+                        id: indirectAllocView
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        clip: true
+                        model: ListModel { id: indirectAllocModel }
+                        delegate: Rectangle {
+                            width: indirectAllocView.width
+                            height: 30
+                            color: index % 2 ? "#f9f9f9" : "white"
+                            RowLayout {
+                                anchors.fill: parent
+                                Text { Layout.preferredWidth: 110; text: model.date }
+                                Text { Layout.preferredWidth: 180; text: model.category; elide: Text.ElideRight }
+                                Text { Layout.fillWidth: true; text: model.machine_model; elide: Text.ElideRight }
+                                Text { Layout.preferredWidth: 120; text: Number(model.amount).toFixed(2) + " ₽" }
+                            }
                         }
                     }
                 }
@@ -316,6 +322,7 @@ Page {
         }
     }
 
+    // ---- Диалог (должен быть вне ScrollView) ----
     property int editCategoryId: -1
 
     Dialog {
@@ -349,7 +356,7 @@ Page {
         }
     }
 
-
+    // ---- Функции (без изменений) ----
     function updateTaxReport() {
         var result = backend.calculateTaxReport(taxStartField.text, taxEndField.text, parseFloat(taxRateField.text || "0"))
         taxIncomeLabel.text = Number(result.income || 0).toFixed(2) + " руб."
