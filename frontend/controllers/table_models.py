@@ -435,7 +435,7 @@ class FinishedGoodsModel(QAbstractTableModel):
         self._all_data = []   # полный список (для фильтрации)
         self._data = []       # отображаемый список
         self._filter = ""
-        self._headers = ["ID", "Модель", "Инв.№", "Произведён", "Покупатель", "Продан", "Себестоимость", "Статус"]
+        self._headers = ["ID", "Модель", "Инв.№", "Дата оконч.", "Покупатель", "Продан", "Себестоимость", "Косвенные", "Статус"]
 
     def rowCount(self, parent=QModelIndex()):
         return len(self._data)
@@ -456,7 +456,8 @@ class FinishedGoodsModel(QAbstractTableModel):
             if col == 4: return row['buyer'] or "—"
             if col == 5: return row['sale_date'] or "—"
             if col == 6: return f"{row['cost']:.2f}" if row['cost'] else "0.00"
-            if col == 7: return row['status']
+            if col == 7: return f"{row['indirect_cost']:.2f}" if row['indirect_cost'] else "0.00"
+            if col == 8: return row['status']
         return None
 
     def headerData(self, section, orientation, role=Qt.DisplayRole):
@@ -527,6 +528,7 @@ class FinishedGoodsModel(QAbstractTableModel):
                         fg.inventory_number, 
                         fg.buyer, 
                         fg.sale_date,
+                        fg.indirect_cost,
                         mc.materials_cost,
                         mc.labor_cost
                     FROM finished_goods fg
@@ -545,8 +547,9 @@ class FinishedGoodsModel(QAbstractTableModel):
                         'inv_num': r[5],
                         'buyer': r[6],
                         'sale_date': str(r[7]) if r[7] else None,
-                        'materials_cost': float(r[8]) if r[8] else 0.0,
-                        'labor_cost': float(r[9]) if r[9] else 0.0
+                        'indirect_cost': float(r[8]) if r[8] else 0.0,
+                        'materials_cost': float(r[9]) if r[9] else 0.0,
+                        'labor_cost': float(r[10]) if r[10] else 0.0
                     }
                     for r in rows
                 ]

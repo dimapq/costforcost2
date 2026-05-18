@@ -1,4 +1,4 @@
-# frontend/controllers/backend_controller.py
+﻿# frontend/controllers/backend_controller.py
 from PySide6.QtCore import QObject, Slot
 from decimal import Decimal
 
@@ -12,15 +12,68 @@ from backend.db.connection import get_connection
 
 
 class BackendController(QObject):
+    def _ensure_indirect_schema(self):
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("ALTER TABLE IF EXISTS materials ADD COLUMN IF NOT EXISTS source TEXT")
+                cur.execute("ALTER TABLE IF EXISTS materials ADD COLUMN IF NOT EXISTS notes TEXT")
+                cur.execute("ALTER TABLE IF EXISTS finished_goods ADD COLUMN IF NOT EXISTS start_date DATE")
+                cur.execute("ALTER TABLE IF EXISTS finished_goods ADD COLUMN IF NOT EXISTS indirect_cost DECIMAL(12, 2) DEFAULT 0")
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS indirect_expense_categories (
+                        id SERIAL PRIMARY KEY,
+                        name VARCHAR(255) NOT NULL,
+                        monthly_amount DECIMAL(12, 2) NOT NULL,
+                        is_active BOOLEAN DEFAULT TRUE,
+                        notes TEXT
+                    )
+                """)
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS indirect_cost_allocations (
+                        id SERIAL PRIMARY KEY,
+                        category_id INT REFERENCES indirect_expense_categories(id) ON DELETE CASCADE,
+                        finished_good_id INT REFERENCES finished_goods(id) ON DELETE CASCADE,
+                        allocation_date DATE NOT NULL,
+                        amount DECIMAL(12, 4) NOT NULL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                cur.execute("""
+                    UPDATE finished_goods
+                    SET start_date = COALESCE(start_date, produced_date, CURRENT_DATE)
+                """)
+            conn.commit()
 
-    # ---------- Станки ----------
+    def _recalculate_months_for_machine(self, finished_good_id):
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT COALESCE(start_date, produced_date, CURRENT_DATE), COALESCE(produced_date, CURRENT_DATE)
+                    FROM finished_goods
+                    WHERE id = %s
+                """, (finished_good_id,))
+                row = cur.fetchone()
+        if not row:
+            return
+        start_date, end_date = row
+        if end_date < start_date:
+            end_date = start_date
+        y, m = start_date.year, start_date.month
+        while (y < end_date.year) or (y == end_date.year and m <= end_date.month):
+            self.recalculateIndirectExpenses(f"{y:04d}-{m:02d}")
+            m += 1
+            if m > 12:
+                y += 1
+                m = 1
+
+    # ---------- РЎС‚Р°РЅРєРё ----------
     @Slot(str, result=str)
     def calculate_cost(self, machine_id):
         try:
             cost = calculate_machine_cost_from_purchases(int(machine_id))
             return f"{cost:.2f}"
         except Exception as e:
-            print(f"Ошибка расчёта стоимости: {e}")
+            print(f"РћС€РёР±РєР° СЂР°СЃС‡С‘С‚Р° СЃС‚РѕРёРјРѕСЃС‚Рё: {e}")
             return "0.00"
 
     @Slot(result="QVariantList")
@@ -28,7 +81,7 @@ class BackendController(QObject):
         machines = list_machines()
         return [{"id": m[0], "model": m[1], "cost": float(m[2]) if m[2] else 0.0} for m in machines]
 
-    # ---------- Сотрудники ----------
+    # ---------- РЎРѕС‚СЂСѓРґРЅРёРєРё ----------
     @Slot(result="QVariantList")
     def getEmployeesList(self):
         with get_connection() as conn:
@@ -43,7 +96,7 @@ class BackendController(QObject):
             from backend.models.labor import add_employee_gui
             return add_employee_gui(name, Decimal(str(rate)), position)
         except Exception as e:
-            print(f"Ошибка добавления сотрудника: {e}")
+            print(f"РћС€РёР±РєР° РґРѕР±Р°РІР»РµРЅРёСЏ СЃРѕС‚СЂСѓРґРЅРёРєР°: {e}")
             return False
 
     @Slot(int, str, float, str, bool, result=bool)
@@ -59,7 +112,7 @@ class BackendController(QObject):
                     conn.commit()
             return True
         except Exception as e:
-            print(f"Ошибка обновления сотрудника: {e}")
+            print(f"РћС€РёР±РєР° РѕР±РЅРѕРІР»РµРЅРёСЏ СЃРѕС‚СЂСѓРґРЅРёРєР°: {e}")
             return False
 
     @Slot(int, result=bool)
@@ -71,7 +124,7 @@ class BackendController(QObject):
                     conn.commit()
             return True
         except Exception as e:
-            print(f"Ошибка изменения статуса: {e}")
+            print(f"РћС€РёР±РєР° РёР·РјРµРЅРµРЅРёСЏ СЃС‚Р°С‚СѓСЃР°: {e}")
             return False
 
     @Slot(str, str, result=str)
@@ -106,14 +159,14 @@ class BackendController(QObject):
                 rate = rate or Decimal('0.00')
                 amount = hours * rate
                 total += amount
-                lines.append(f"{name}: {hours:.2f} ч × {rate:.2f} = {amount:.2f} руб.")
-            lines.append(f"ИТОГО: {total:.2f} руб.")
+                lines.append(f"{name}: {hours:.2f} С‡ Г— {rate:.2f} = {amount:.2f} СЂСѓР±.")
+            lines.append(f"РРўРћР“Рћ: {total:.2f} СЂСѓР±.")
             return "\n".join(lines)
         except Exception as e:
-            print(f"Ошибка расчёта зарплаты: {e}")
-            return "Ошибка расчёта"
+            print(f"РћС€РёР±РєР° СЂР°СЃС‡С‘С‚Р° Р·Р°СЂРїР»Р°С‚С‹: {e}")
+            return "РћС€РёР±РєР° СЂР°СЃС‡С‘С‚Р°"
 
-    # ---------- Готовые станки ----------
+    # ---------- Р“РѕС‚РѕРІС‹Рµ СЃС‚Р°РЅРєРё ----------
     @Slot(result="QVariantList")
     def getFinishedGoodsList(self):
         with get_connection() as conn:
@@ -125,11 +178,11 @@ class BackendController(QObject):
                     ORDER BY produced_date DESC
                 """)
                 rows = cur.fetchall()
-        return [{"id": row[0], "display": f"{row[1]} (ID {row[0]}, {row[2]:.2f} руб.)"} for row in rows]
+        return [{"id": row[0], "display": f"{row[1]} (ID {row[0]}, {row[2]:.2f} СЂСѓР±.)"} for row in rows]
 
     @Slot(result="QVariantList")
     def getInProgressMachinesList(self):
-        """Возвращает список станков в активном пуле (статус 'in_progress')."""
+        """Р’РѕР·РІСЂР°С‰Р°РµС‚ СЃРїРёСЃРѕРє СЃС‚Р°РЅРєРѕРІ РІ Р°РєС‚РёРІРЅРѕРј РїСѓР»Рµ (СЃС‚Р°С‚СѓСЃ 'in_progress')."""
         with get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("""
@@ -142,22 +195,22 @@ class BackendController(QObject):
         return [
             {
                 "id": row[0], 
-                "display": f"{row[1]} (ID {row[0]}, начат {row[2]})"
+                "display": f"{row[1]} (ID {row[0]}, РЅР°С‡Р°С‚ {row[2]})"
             } 
             for row in rows
         ]
 
-    # ---------- Учёт рабочего времени ----------
+    # ---------- РЈС‡С‘С‚ СЂР°Р±РѕС‡РµРіРѕ РІСЂРµРјРµРЅРё ----------
     @Slot(int, int, float, str, result=bool)
     def logWorkHours(self, employee_id, finished_good_id, hours, notes):
         try:
             add_labor_to_finished_good(finished_good_id, employee_id, Decimal(str(hours)), notes)
             return True
         except Exception as e:
-            print(f"Ошибка записи часов: {e}")
+            print(f"РћС€РёР±РєР° Р·Р°РїРёСЃРё С‡Р°СЃРѕРІ: {e}")
             return False
 
-    # ---------- Складские сводки ----------
+    # ---------- РЎРєР»Р°РґСЃРєРёРµ СЃРІРѕРґРєРё ----------
     @Slot(result=str)
     def getMaterialsSummary(self):
         try:
@@ -189,14 +242,14 @@ class BackendController(QObject):
                     "date": t['date'].strftime("%d.%m.%Y %H:%M") if t.get('date') else "",
                     "type": t.get('type', ''),
                     "description": t.get('description', ''),
-                    "amount": f"{t.get('amount', 0):.2f} руб." if t.get('amount') else ""
+                    "amount": f"{t.get('amount', 0):.2f} СЂСѓР±." if t.get('amount') else ""
                 })
             return result
         except Exception as e:
-            print(f"Ошибка получения транзакций: {e}")
+            print(f"РћС€РёР±РєР° РїРѕР»СѓС‡РµРЅРёСЏ С‚СЂР°РЅР·Р°РєС†РёР№: {e}")
             return []
 
-    # ---------- Материалы ----------
+    # ---------- РњР°С‚РµСЂРёР°Р»С‹ ----------
     @Slot(str, str, float, float, str, str, result=bool)
     def addMaterial(self, name, unit, price, quantity, source, notes):
         try:
@@ -225,7 +278,7 @@ class BackendController(QObject):
                     conn.commit()
             return True
         except Exception as e:
-            print(f"Ошибка добавления материала: {e}")
+            print(f"РћС€РёР±РєР° РґРѕР±Р°РІР»РµРЅРёСЏ РјР°С‚РµСЂРёР°Р»Р°: {e}")
             return False
 
     @Slot(str, result=bool)
@@ -235,7 +288,7 @@ class BackendController(QObject):
             quick_add_product(url, notes=url)
             return True
         except Exception as e:
-            print(f"Ошибка парсинга: {e}")
+            print(f"РћС€РёР±РєР° РїР°СЂСЃРёРЅРіР°: {e}")
             return False
 
     @Slot(int, float, str, result=bool)
@@ -262,7 +315,7 @@ class BackendController(QObject):
                     conn.commit()
             return True
         except Exception as e:
-            print(f"Ошибка инвентаризации: {e}")
+            print(f"РћС€РёР±РєР° РёРЅРІРµРЅС‚Р°СЂРёР·Р°С†РёРё: {e}")
             return False
 
     @Slot(result="QVariantList")
@@ -273,7 +326,24 @@ class BackendController(QObject):
                 rows = cur.fetchall()
         return [{"id": row[0], "name": row[1]} for row in rows]
 
-    # ---------- Инструменты ----------
+    @Slot(int, float, str, result=bool)
+    def updateMaterialUnitPrice(self, material_id, new_price, note):
+        try:
+            if new_price <= 0:
+                return False
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        INSERT INTO purchases (material_id, price_per_unit, quantity, remaining_quantity, purchase_date, notes)
+                        VALUES (%s, %s, 0, 0, CURRENT_DATE, %s)
+                    """, (material_id, Decimal(str(new_price)), note if note else "РћР±РЅРѕРІР»РµРЅРёРµ С†РµРЅС‹ Р·Р° РµРґРёРЅРёС†Сѓ"))
+                    conn.commit()
+            return True
+        except Exception as e:
+            print(f"РћС€РёР±РєР° РѕР±РЅРѕРІР»РµРЅРёСЏ С†РµРЅС‹ РјР°С‚РµСЂРёР°Р»Р°: {e}")
+            return False
+
+    # ---------- РРЅСЃС‚СЂСѓРјРµРЅС‚С‹ ----------
     @Slot(str, str, float, int, str, result=bool)
     def addTool(self, name, inv_num, cost, life_months, notes):
         try:
@@ -289,7 +359,7 @@ class BackendController(QObject):
                     conn.commit()
             return True
         except Exception as e:
-            print(f"Ошибка добавления инструмента: {e}")
+            print(f"РћС€РёР±РєР° РґРѕР±Р°РІР»РµРЅРёСЏ РёРЅСЃС‚СЂСѓРјРµРЅС‚Р°: {e}")
             return False
 
     @Slot(result="QVariantList")
@@ -310,16 +380,16 @@ class BackendController(QObject):
                     cur.execute("""
                         INSERT INTO tool_depreciation (tool_id, amount, notes)
                         VALUES (%s, %s, %s)
-                    """, (tool_id, residual, f"Списание: {reason}"))
+                    """, (tool_id, residual, f"РЎРїРёСЃР°РЅРёРµ: {reason}"))
                     cur.execute("UPDATE tools SET residual_value = 0, status = 'written_off' WHERE id = %s", (tool_id,))
                     cur.execute("""
                         INSERT INTO balance (date, expense, notes)
                         VALUES (CURRENT_DATE, %s, %s)
-                    """, (residual, f"Списание инструмента: {reason}"))
+                    """, (residual, f"РЎРїРёСЃР°РЅРёРµ РёРЅСЃС‚СЂСѓРјРµРЅС‚Р°: {reason}"))
                     conn.commit()
             return True
         except Exception as e:
-            print(f"Ошибка списания инструмента: {e}")
+            print(f"РћС€РёР±РєР° СЃРїРёСЃР°РЅРёСЏ РёРЅСЃС‚СЂСѓРјРµРЅС‚Р°: {e}")
             return False
 
     @Slot(int, float, result=bool)
@@ -339,24 +409,24 @@ class BackendController(QObject):
                         amount = float(residual)
                     cur.execute("""
                         INSERT INTO tool_depreciation (tool_id, amount, notes)
-                        VALUES (%s, %s, 'Амортизация')
+                        VALUES (%s, %s, 'РђРјРѕСЂС‚РёР·Р°С†РёСЏ')
                     """, (tool_id, Decimal(str(amount))))
                     cur.execute("UPDATE tools SET residual_value = residual_value - %s WHERE id = %s",
                                 (Decimal(str(amount)), tool_id))
                     conn.commit()
             return True
         except Exception as e:
-            print(f"Ошибка начисления амортизации: {e}")
+            print(f"РћС€РёР±РєР° РЅР°С‡РёСЃР»РµРЅРёСЏ Р°РјРѕСЂС‚РёР·Р°С†РёРё: {e}")
             return False
 
-    # ---------- Модели станков ----------
+    # ---------- РњРѕРґРµР»Рё СЃС‚Р°РЅРєРѕРІ ----------
     @Slot(str, result=bool)
     def addMachineModel(self, model):
         try:
             from backend.models.machine import add_new_machine_gui
             return add_new_machine_gui(model)
         except Exception as e:
-            print(f"Ошибка добавления модели: {e}")
+            print(f"РћС€РёР±РєР° РґРѕР±Р°РІР»РµРЅРёСЏ РјРѕРґРµР»Рё: {e}")
             return False
 
     @Slot(int, int, float, result=bool)
@@ -365,7 +435,7 @@ class BackendController(QObject):
             from backend.models.machine import add_material_to_machine_gui
             return add_material_to_machine_gui(machine_id, material_id, Decimal(str(quantity)))
         except Exception as e:
-            print(f"Ошибка добавления материала: {e}")
+            print(f"РћС€РёР±РєР° РґРѕР±Р°РІР»РµРЅРёСЏ РјР°С‚РµСЂРёР°Р»Р°: {e}")
             return False
 
     @Slot(int, int, result=bool)
@@ -374,7 +444,7 @@ class BackendController(QObject):
             from backend.models.machine import remove_material_from_machine_gui
             return remove_material_from_machine_gui(machine_id, material_id)
         except Exception as e:
-            print(f"Ошибка удаления материала: {e}")
+            print(f"РћС€РёР±РєР° СѓРґР°Р»РµРЅРёСЏ РјР°С‚РµСЂРёР°Р»Р°: {e}")
             return False
 
     @Slot(int, int, float, result=bool)
@@ -383,7 +453,7 @@ class BackendController(QObject):
             from backend.models.machine import edit_material_quantity_in_machine_gui
             return edit_material_quantity_in_machine_gui(machine_id, material_id, Decimal(str(quantity)))
         except Exception as e:
-            print(f"Ошибка изменения количества: {e}")
+            print(f"РћС€РёР±РєР° РёР·РјРµРЅРµРЅРёСЏ РєРѕР»РёС‡РµСЃС‚РІР°: {e}")
             return False
 
     @Slot(int, result=bool)
@@ -391,22 +461,22 @@ class BackendController(QObject):
         try:
             with get_connection() as conn:
                 with conn.cursor() as cur:
-                    # Проверяем что нет станков в производстве с этой моделью
+                    # РџСЂРѕРІРµСЂСЏРµРј С‡С‚Рѕ РЅРµС‚ СЃС‚Р°РЅРєРѕРІ РІ РїСЂРѕРёР·РІРѕРґСЃС‚РІРµ СЃ СЌС‚РѕР№ РјРѕРґРµР»СЊСЋ
                     cur.execute("""
                         SELECT COUNT(*) FROM finished_goods 
                         WHERE machine_id = %s AND status IN ('in_progress', 'completed')
                     """, (machine_id,))
                     count = cur.fetchone()[0]
                     if count > 0:
-                        print(f"Нельзя удалить модель: есть {count} станков в производстве/на складе")
+                        print(f"РќРµР»СЊР·СЏ СѓРґР°Р»РёС‚СЊ РјРѕРґРµР»СЊ: РµСЃС‚СЊ {count} СЃС‚Р°РЅРєРѕРІ РІ РїСЂРѕРёР·РІРѕРґСЃС‚РІРµ/РЅР° СЃРєР»Р°РґРµ")
                         return False
                 
-                # Удаляем модель (каскадно удалятся machine_materials, machine_tools, machine_labor_costs)
+                # РЈРґР°Р»СЏРµРј РјРѕРґРµР»СЊ (РєР°СЃРєР°РґРЅРѕ СѓРґР°Р»СЏС‚СЃСЏ machine_materials, machine_tools, machine_labor_costs)
                     cur.execute("DELETE FROM machines WHERE id = %s", (machine_id,))
                     conn.commit()
             return True
         except Exception as e:
-            print(f"Ошибка удаления модели: {e}")
+            print(f"РћС€РёР±РєР° СѓРґР°Р»РµРЅРёСЏ РјРѕРґРµР»Рё: {e}")
             return False
 
     @Slot(int, int, str, result=bool)
@@ -415,7 +485,7 @@ class BackendController(QObject):
             from backend.models.production import produce_machine_gui
             return produce_machine_gui(machine_id, quantity, notes)
         except Exception as e:
-            print(f"Ошибка производства: {e}")
+            print(f"РћС€РёР±РєР° РїСЂРѕРёР·РІРѕРґСЃС‚РІР°: {e}")
             return False
 
     @Slot(int, float, str, result=bool)
@@ -424,16 +494,20 @@ class BackendController(QObject):
             from backend.models.production import sell_finished_good_gui
             return sell_finished_good_gui(finished_good_id, Decimal(str(sale_price)), buyer)
         except Exception as e:
-            print(f"Ошибка продажи: {e}")
+            print(f"РћС€РёР±РєР° РїСЂРѕРґР°Р¶Рё: {e}")
             return False
 
     @Slot(int, int, str, result=bool)
     def startProduction(self, machine_id, quantity, notes):
         try:
             from backend.models.production import start_production_gui
-            return start_production_gui(machine_id, quantity, notes)
+            ok = start_production_gui(machine_id, quantity, notes)
+            if ok:
+                from datetime import date
+                self.recalculateIndirectExpenses(date.today().strftime("%Y-%m"))
+            return ok
         except Exception as e:
-            print(f"Ошибка начала производства: {e}")
+            print(f"РћС€РёР±РєР° РЅР°С‡Р°Р»Р° РїСЂРѕРёР·РІРѕРґСЃС‚РІР°: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -442,21 +516,24 @@ class BackendController(QObject):
     def completeMachine(self, finished_good_id, inventory_number):
         try:
             from backend.models.production import complete_machine_with_material_deduction
-            return complete_machine_with_material_deduction(finished_good_id, inventory_number)
+            ok = complete_machine_with_material_deduction(finished_good_id, inventory_number)
+            if ok:
+                self._recalculate_months_for_machine(finished_good_id)
+            return ok
         except Exception as e:
-            print(f"Ошибка завершения производства: {e}")
+            print(f"РћС€РёР±РєР° Р·Р°РІРµСЂС€РµРЅРёСЏ РїСЂРѕРёР·РІРѕРґСЃС‚РІР°: {e}")
             import traceback
             traceback.print_exc()
             return False
 
-    # ---------- Финансы и аналитика ----------
+    # ---------- Р¤РёРЅР°РЅСЃС‹ Рё Р°РЅР°Р»РёС‚РёРєР° ----------
     @Slot(result=str)
     def getTotalAssets(self):
         try:
             from backend.models.analytics import get_total_assets
             return f"{get_total_assets():.2f}"
         except Exception as e:
-            print(f"Ошибка получения активов: {e}")
+            print(f"РћС€РёР±РєР° РїРѕР»СѓС‡РµРЅРёСЏ Р°РєС‚РёРІРѕРІ: {e}")
             return "0.00"
 
     @Slot(str, str, result=str)
@@ -471,7 +548,7 @@ class BackendController(QObject):
                     revenue = cur.fetchone()[0]
             return f"{revenue:.2f}"
         except Exception as e:
-            print(f"Ошибка расчёта выручки: {e}")
+            print(f"РћС€РёР±РєР° СЂР°СЃС‡С‘С‚Р° РІС‹СЂСѓС‡РєРё: {e}")
             return "0.00"
 
     @Slot(str, str, result=str)
@@ -486,7 +563,7 @@ class BackendController(QObject):
                     profit = cur.fetchone()[0]
             return f"{profit:.2f}"
         except Exception as e:
-            print(f"Ошибка расчёта прибыли: {e}")
+            print(f"РћС€РёР±РєР° СЂР°СЃС‡С‘С‚Р° РїСЂРёР±С‹Р»Рё: {e}")
             return "0.00"
 
     @Slot(str, str, result=str)
@@ -525,24 +602,24 @@ class BackendController(QObject):
                     material_cost = abs(cur.fetchone()[0] or Decimal('0'))
                     total_expense = tool_depr + salary + material_cost
                     profit = revenue - total_expense
-                    report = f"ОТЧЁТ О ПРИБЫЛЯХ И УБЫТКАХ\nПериод: {start} – {end}\n"
+                    report = f"РћРўР§РЃРў Рћ РџР РР‘Р«Р›РЇРҐ Р РЈР‘Р«РўРљРђРҐ\nРџРµСЂРёРѕРґ: {start} вЂ“ {end}\n"
                     report += f"{'='*50}\n"
-                    report += f"Доходы (продажи): {revenue:.2f} руб.\n"
-                    report += f"Расходы:\n"
-                    report += f"  - Материалы: {material_cost:.2f} руб.\n"
-                    report += f"  - Зарплата: {salary:.2f} руб.\n"
-                    report += f"  - Амортизация инструментов: {tool_depr:.2f} руб.\n"
-                    report += f"  Итого расходов: {total_expense:.2f} руб.\n"
+                    report += f"Р”РѕС…РѕРґС‹ (РїСЂРѕРґР°Р¶Рё): {revenue:.2f} СЂСѓР±.\n"
+                    report += f"Р Р°СЃС…РѕРґС‹:\n"
+                    report += f"  - РњР°С‚РµСЂРёР°Р»С‹: {material_cost:.2f} СЂСѓР±.\n"
+                    report += f"  - Р—Р°СЂРїР»Р°С‚Р°: {salary:.2f} СЂСѓР±.\n"
+                    report += f"  - РђРјРѕСЂС‚РёР·Р°С†РёСЏ РёРЅСЃС‚СЂСѓРјРµРЅС‚РѕРІ: {tool_depr:.2f} СЂСѓР±.\n"
+                    report += f"  РС‚РѕРіРѕ СЂР°СЃС…РѕРґРѕРІ: {total_expense:.2f} СЂСѓР±.\n"
                     report += f"{'='*50}\n"
-                    report += f"ЧИСТАЯ ПРИБЫЛЬ: {profit:.2f} руб.\n"
+                    report += f"Р§РРЎРўРђРЇ РџР РР‘Р«Р›Р¬: {profit:.2f} СЂСѓР±.\n"
                     return report
         except Exception as e:
-            print(f"Ошибка формирования отчёта: {e}")
-            return "Ошибка при формировании отчёта"
+            print(f"РћС€РёР±РєР° С„РѕСЂРјРёСЂРѕРІР°РЅРёСЏ РѕС‚С‡С‘С‚Р°: {e}")
+            return "РћС€РёР±РєР° РїСЂРё С„РѕСЂРјРёСЂРѕРІР°РЅРёРё РѕС‚С‡С‘С‚Р°"
 
     @Slot(result="QVariantList")
     def getSoldMachinesList(self):
-        """Возвращает список проданных станков с прибылью."""
+        """Р’РѕР·РІСЂР°С‰Р°РµС‚ СЃРїРёСЃРѕРє РїСЂРѕРґР°РЅРЅС‹С… СЃС‚Р°РЅРєРѕРІ СЃ РїСЂРёР±С‹Р»СЊСЋ."""
         with get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("""
@@ -575,11 +652,11 @@ class BackendController(QObject):
 
     @Slot(int, float, str, str, str, result=bool)
     def sellFinishedGoodExtended(self, finished_good_id, sale_price, buyer, inv_number, sale_date):
-        """Расширенная версия продажи с инв. номером и датой."""
+        """Р Р°СЃС€РёСЂРµРЅРЅР°СЏ РІРµСЂСЃРёСЏ РїСЂРѕРґР°Р¶Рё СЃ РёРЅРІ. РЅРѕРјРµСЂРѕРј Рё РґР°С‚РѕР№."""
         try:
             from datetime import datetime, date
             
-            # Обработка даты
+            # РћР±СЂР°Р±РѕС‚РєР° РґР°С‚С‹
             if sale_date:
                 try:
                     sale_date_obj = datetime.strptime(sale_date, "%Y-%m-%d").date()
@@ -593,12 +670,12 @@ class BackendController(QObject):
                     cur.execute("SELECT cost_price FROM finished_goods WHERE id = %s", (finished_good_id,))
                     cost_row = cur.fetchone()
                     if not cost_row:
-                        print("Станок не найден")
+                        print("РЎС‚Р°РЅРѕРє РЅРµ РЅР°Р№РґРµРЅ")
                         return False
                     
-                    cost = cost_row[0]  # Decimal из БД
-                    sale_price_decimal = Decimal(str(sale_price))  # ← ИСПРАВЛЕНИЕ
-                    profit = sale_price_decimal - cost  # Теперь оба Decimal
+                    cost = cost_row[0]  # Decimal РёР· Р‘Р”
+                    sale_price_decimal = Decimal(str(sale_price))  # в†ђ РРЎРџР РђР’Р›Р•РќРР•
+                    profit = sale_price_decimal - cost  # РўРµРїРµСЂСЊ РѕР±Р° Decimal
 
                     cur.execute("""
                         INSERT INTO sales (finished_good_id, sale_price, profit, sale_date)
@@ -617,40 +694,40 @@ class BackendController(QObject):
                     cur.execute("""
                         INSERT INTO balance (date, income, notes)
                         VALUES (%s, %s, %s)
-                    """, (sale_date_obj, sale_price_decimal, f"Продажа станка ID {finished_good_id} покупателю {buyer}"))
+                    """, (sale_date_obj, sale_price_decimal, f"РџСЂРѕРґР°Р¶Р° СЃС‚Р°РЅРєР° ID {finished_good_id} РїРѕРєСѓРїР°С‚РµР»СЋ {buyer}"))
 
                     conn.commit()
             return True
         except Exception as e:
-            print(f"Ошибка продажи: {e}")
+            print(f"РћС€РёР±РєР° РїСЂРѕРґР°Р¶Рё: {e}")
             import traceback
             traceback.print_exc()
             return False
 
     @Slot(int, result="QVariantMap")
     def getMachineCostDetails(self, finished_good_id):
-        """Возвращает детальную разбивку себестоимости станка."""
+        """Р’РѕР·РІСЂР°С‰Р°РµС‚ РґРµС‚Р°Р»СЊРЅСѓСЋ СЂР°Р·Р±РёРІРєСѓ СЃРµР±РµСЃС‚РѕРёРјРѕСЃС‚Рё СЃС‚Р°РЅРєР°."""
         try:
             with get_connection() as conn:
                 with conn.cursor() as cur:
-                    # Основная информация
+                    # РћСЃРЅРѕРІРЅР°СЏ РёРЅС„РѕСЂРјР°С†РёСЏ
                     cur.execute("""
                         SELECT machine_model, cost_price, produced_date, machine_id
                         FROM finished_goods WHERE id = %s
                     """, (finished_good_id,))
                     fg = cur.fetchone()
                     if not fg:
-                        return {"header": "Станок не найден", "breakdown": ""}
+                        return {"header": "РЎС‚Р°РЅРѕРє РЅРµ РЅР°Р№РґРµРЅ", "breakdown": ""}
 
                     model, total_cost, prod_date, machine_id = fg
-                    header = f"Станок: {model} (ID {finished_good_id})\nОбщая себестоимость: {total_cost:.2f} ₽"
+                    header = f"РЎС‚Р°РЅРѕРє: {model} (ID {finished_good_id})\nРћР±С‰Р°СЏ СЃРµР±РµСЃС‚РѕРёРјРѕСЃС‚СЊ: {total_cost:.2f} в‚Ѕ"
 
-                    breakdown = f"Произведён: {prod_date}\n\n"
+                    breakdown = f"РџСЂРѕРёР·РІРµРґС‘РЅ: {prod_date}\n\n"
                     breakdown += "=" * 60 + "\n"
-                    breakdown += "РАЗБИВКА СЕБЕСТОИМОСТИ\n"
+                    breakdown += "Р РђР—Р‘РР’РљРђ РЎР•Р‘Р•РЎРўРћРРњРћРЎРўР\n"
                     breakdown += "=" * 60 + "\n\n"
 
-                    # Материалы
+                    # РњР°С‚РµСЂРёР°Р»С‹
                     cur.execute("""
                         WITH latest_prices AS (
                             SELECT DISTINCT ON (material_id) material_id, price_per_unit
@@ -667,16 +744,16 @@ class BackendController(QObject):
                     materials = cur.fetchall()
                     
                     materials_total = Decimal('0')
-                    breakdown += "МАТЕРИАЛЫ:\n"
+                    breakdown += "РњРђРўР•Р РРђР›Р«:\n"
                     breakdown += "-" * 60 + "\n"
                     for name, qty, price, total in materials:
                         if price:
-                            breakdown += f"{name:<35} {qty:>8.2f} × {price:>8.2f} = {total:>10.2f} ₽\n"
+                            breakdown += f"{name:<35} {qty:>8.2f} Г— {price:>8.2f} = {total:>10.2f} в‚Ѕ\n"
                             materials_total += total
                     breakdown += "-" * 60 + "\n"
-                    breakdown += f"{'ИТОГО МАТЕРИАЛЫ:':<52} {materials_total:>10.2f} ₽\n\n"
+                    breakdown += f"{'РРўРћР“Рћ РњРђРўР•Р РРђР›Р«:':<52} {materials_total:>10.2f} в‚Ѕ\n\n"
 
-                    # Трудозатраты
+                    # РўСЂСѓРґРѕР·Р°С‚СЂР°С‚С‹
                     cur.execute("""
                         SELECT e.name, wl.hours, e.hourly_rate, (wl.hours * e.hourly_rate) as cost
                         FROM work_logs wl
@@ -689,15 +766,15 @@ class BackendController(QObject):
 
                     labor_total = Decimal('0')
                     if labor:
-                        breakdown += "ТРУДОЗАТРАТЫ:\n"
+                        breakdown += "РўР РЈР”РћР—РђРўР РђРўР«:\n"
                         breakdown += "-" * 60 + "\n"
                         for emp_name, hours, rate, cost in labor:
-                            breakdown += f"{emp_name:<35} {hours:>8.2f} ч × {rate:>8.2f} = {cost:>10.2f} ₽\n"
+                            breakdown += f"{emp_name:<35} {hours:>8.2f} С‡ Г— {rate:>8.2f} = {cost:>10.2f} в‚Ѕ\n"
                             labor_total += cost
                         breakdown += "-" * 60 + "\n"
-                        breakdown += f"{'ИТОГО РАБОТА:':<52} {labor_total:>10.2f} ₽\n\n"
+                        breakdown += f"{'РРўРћР“Рћ Р РђР‘РћРўРђ:':<52} {labor_total:>10.2f} в‚Ѕ\n\n"
 
-                    # Амортизация инструментов
+                    # РђРјРѕСЂС‚РёР·Р°С†РёСЏ РёРЅСЃС‚СЂСѓРјРµРЅС‚РѕРІ
                     cur.execute("""
                         SELECT t.name, td.amount
                         FROM tool_depreciation td
@@ -708,50 +785,69 @@ class BackendController(QObject):
 
                     tools_total = Decimal('0')
                     if tools_depr:
-                        breakdown += "АМОРТИЗАЦИЯ ИНСТРУМЕНТОВ:\n"
+                        breakdown += "РђРњРћР РўРР—РђР¦РРЇ РРќРЎРўР РЈРњР•РќРўРћР’:\n"
                         breakdown += "-" * 60 + "\n"
                         for tool_name, amount in tools_depr:
-                            breakdown += f"{tool_name:<52} {amount:>10.2f} ₽\n"
+                            breakdown += f"{tool_name:<52} {amount:>10.2f} в‚Ѕ\n"
                             tools_total += amount
                         breakdown += "-" * 60 + "\n"
-                        breakdown += f"{'ИТОГО АМОРТИЗАЦИЯ:':<52} {tools_total:>10.2f} ₽\n\n"
+                        breakdown += f"{'РРўРћР“Рћ РђРњРћР РўРР—РђР¦РРЇ:':<52} {tools_total:>10.2f} в‚Ѕ\n\n"
+
+                    # Косвенные расходы
+                    cur.execute("""
+                        SELECT c.name, a.allocation_date, a.amount
+                        FROM indirect_cost_allocations a
+                        JOIN indirect_expense_categories c ON c.id = a.category_id
+                        WHERE a.finished_good_id = %s
+                        ORDER BY a.allocation_date, c.name
+                    """, (finished_good_id,))
+                    indirect_rows = cur.fetchall()
+                    indirect_total = Decimal('0')
+                    if indirect_rows:
+                        breakdown += "КОСВЕННЫЕ РАСХОДЫ:\n"
+                        breakdown += "-" * 60 + "\n"
+                        for cat_name, alloc_date, amount in indirect_rows:
+                            breakdown += f"{str(alloc_date):<12} {cat_name:<38} {amount:>10.2f} ₽\n"
+                            indirect_total += amount
+                        breakdown += "-" * 60 + "\n"
+                        breakdown += f"{'ИТОГО КОСВЕННЫЕ:':<52} {indirect_total:>10.2f} ₽\n\n"
 
                     breakdown += "=" * 60 + "\n"
-                    calculated_total = materials_total + labor_total + tools_total
-                    breakdown += f"{'РАСЧЁТНАЯ СЕБЕСТОИМОСТЬ:':<52} {calculated_total:>10.2f} ₽\n"
-                    breakdown += f"{'ЗАПИСАНО В БД:':<52} {total_cost:>10.2f} ₽\n"
+                    calculated_total = materials_total + labor_total + tools_total + indirect_total
+                    breakdown += f"{'Р РђРЎР§РЃРўРќРђРЇ РЎР•Р‘Р•РЎРўРћРРњРћРЎРўР¬:':<52} {calculated_total:>10.2f} в‚Ѕ\n"
+                    breakdown += f"{'Р—РђРџРРЎРђРќРћ Р’ Р‘Р”:':<52} {total_cost:>10.2f} в‚Ѕ\n"
                     
                     diff = total_cost - calculated_total
                     if abs(diff) > Decimal('0.01'):
-                        breakdown += f"{'РАЗНИЦА:':<52} {diff:>10.2f} ₽\n"
+                        breakdown += f"{'Р РђР—РќРР¦Рђ:':<52} {diff:>10.2f} в‚Ѕ\n"
 
                     return {"header": header, "breakdown": breakdown}
 
         except Exception as e:
-            print(f"Ошибка получения деталей: {e}")
-            return {"header": "Ошибка", "breakdown": str(e)}
+            print(f"РћС€РёР±РєР° РїРѕР»СѓС‡РµРЅРёСЏ РґРµС‚Р°Р»РµР№: {e}")
+            return {"header": "РћС€РёР±РєР°", "breakdown": str(e)}
 
     @Slot(int, result=bool)
     def returnMachineToStock(self, finished_good_id):
-        """Возвращает проданный станок на склад, удаляет запись о продаже."""
+        """Р’РѕР·РІСЂР°С‰Р°РµС‚ РїСЂРѕРґР°РЅРЅС‹Р№ СЃС‚Р°РЅРѕРє РЅР° СЃРєР»Р°Рґ, СѓРґР°Р»СЏРµС‚ Р·Р°РїРёСЃСЊ Рѕ РїСЂРѕРґР°Р¶Рµ."""
         try:
             with get_connection() as conn:
                 with conn.cursor() as cur:
-                    # Проверяем что станок действительно продан
+                    # РџСЂРѕРІРµСЂСЏРµРј С‡С‚Рѕ СЃС‚Р°РЅРѕРє РґРµР№СЃС‚РІРёС‚РµР»СЊРЅРѕ РїСЂРѕРґР°РЅ
                     cur.execute("""
                         SELECT status FROM finished_goods WHERE id = %s
                     """, (finished_good_id,))
                     row = cur.fetchone()
                     if not row or row[0] != 'sold':
-                        print("Станок не найден или не продан")
+                        print("РЎС‚Р°РЅРѕРє РЅРµ РЅР°Р№РґРµРЅ РёР»Рё РЅРµ РїСЂРѕРґР°РЅ")
                         return False
 
-                    # Удаляем запись о продаже
+                    # РЈРґР°Р»СЏРµРј Р·Р°РїРёСЃСЊ Рѕ РїСЂРѕРґР°Р¶Рµ
                     cur.execute("""
                         DELETE FROM sales WHERE finished_good_id = %s
                     """, (finished_good_id,))
 
-                    # Возвращаем станок на склад
+                    # Р’РѕР·РІСЂР°С‰Р°РµРј СЃС‚Р°РЅРѕРє РЅР° СЃРєР»Р°Рґ
                     cur.execute("""
                         UPDATE finished_goods
                         SET status = 'completed',
@@ -760,24 +856,24 @@ class BackendController(QObject):
                         WHERE id = %s
                     """, (finished_good_id,))
 
-                    # Удаляем запись из баланса (если есть)
+                    # РЈРґР°Р»СЏРµРј Р·Р°РїРёСЃСЊ РёР· Р±Р°Р»Р°РЅСЃР° (РµСЃР»Рё РµСЃС‚СЊ)
                     cur.execute("""
                         DELETE FROM balance 
                         WHERE notes LIKE %s
-                    """, (f"%станка ID {finished_good_id}%",))
+                    """, (f"%СЃС‚Р°РЅРєР° ID {finished_good_id}%",))
 
                     conn.commit()
-                    print(f"Станок ID {finished_good_id} возвращён на склад")
+                    print(f"РЎС‚Р°РЅРѕРє ID {finished_good_id} РІРѕР·РІСЂР°С‰С‘РЅ РЅР° СЃРєР»Р°Рґ")
             return True
         except Exception as e:
-            print(f"Ошибка возврата на склад: {e}")
+            print(f"РћС€РёР±РєР° РІРѕР·РІСЂР°С‚Р° РЅР° СЃРєР»Р°Рґ: {e}")
             import traceback
             traceback.print_exc()
             return False
 
     @Slot(str, str, int, result="QVariantList")
     def getWorkHistory(self, date_from, date_to, employee_id=None):
-        """Возвращает историю работы с фильтрацией."""
+        """Р’РѕР·РІСЂР°С‰Р°РµС‚ РёСЃС‚РѕСЂРёСЋ СЂР°Р±РѕС‚С‹ СЃ С„РёР»СЊС‚СЂР°С†РёРµР№."""
         try:
             from datetime import datetime, date
             
@@ -845,16 +941,16 @@ class BackendController(QObject):
                 for r in rows
             ]
         except Exception as e:
-            print(f"Ошибка получения истории: {e}")
+            print(f"РћС€РёР±РєР° РїРѕР»СѓС‡РµРЅРёСЏ РёСЃС‚РѕСЂРёРё: {e}")
             return []
 
     @Slot(int, result=bool)
     def undoWorkLog(self, work_log_id):
-        """Отменяет запись о работе и пересчитывает себестоимость станка."""
+        """РћС‚РјРµРЅСЏРµС‚ Р·Р°РїРёСЃСЊ Рѕ СЂР°Р±РѕС‚Рµ Рё РїРµСЂРµСЃС‡РёС‚С‹РІР°РµС‚ СЃРµР±РµСЃС‚РѕРёРјРѕСЃС‚СЊ СЃС‚Р°РЅРєР°."""
         try:
             with get_connection() as conn:
                 with conn.cursor() as cur:
-                    # Получаем информацию о записи
+                    # РџРѕР»СѓС‡Р°РµРј РёРЅС„РѕСЂРјР°С†РёСЋ Рѕ Р·Р°РїРёСЃРё
                     cur.execute("""
                         SELECT e.hourly_rate, wl.hours, fgl.finished_good_id
                         FROM work_logs wl
@@ -865,13 +961,13 @@ class BackendController(QObject):
                     
                     row = cur.fetchone()
                     if not row:
-                        print("Запись не найдена")
+                        print("Р—Р°РїРёСЃСЊ РЅРµ РЅР°Р№РґРµРЅР°")
                         return False
                         
                     rate, hours, finished_good_id = row
                     cost_to_subtract = rate * hours
                     
-                    # Если привязано к станку — уменьшаем себестоимость
+                    # Р•СЃР»Рё РїСЂРёРІСЏР·Р°РЅРѕ Рє СЃС‚Р°РЅРєСѓ вЂ” СѓРјРµРЅСЊС€Р°РµРј СЃРµР±РµСЃС‚РѕРёРјРѕСЃС‚СЊ
                     if finished_good_id:
                         cur.execute("""
                             UPDATE finished_goods
@@ -879,27 +975,27 @@ class BackendController(QObject):
                             WHERE id = %s
                         """, (cost_to_subtract, finished_good_id))
                         
-                        # Удаляем связь
+                        # РЈРґР°Р»СЏРµРј СЃРІСЏР·СЊ
                         cur.execute("""
                             DELETE FROM finished_good_labor
                             WHERE work_log_id = %s
                         """, (work_log_id,))
                     
-                    # Удаляем саму запись
+                    # РЈРґР°Р»СЏРµРј СЃР°РјСѓ Р·Р°РїРёСЃСЊ
                     cur.execute("DELETE FROM work_logs WHERE id = %s", (work_log_id,))
                     
                     conn.commit()
-                    print(f"Запись о работе ID {work_log_id} отменена, себестоимость уменьшена на {cost_to_subtract:.2f}")
+                    print(f"Р—Р°РїРёСЃСЊ Рѕ СЂР°Р±РѕС‚Рµ ID {work_log_id} РѕС‚РјРµРЅРµРЅР°, СЃРµР±РµСЃС‚РѕРёРјРѕСЃС‚СЊ СѓРјРµРЅСЊС€РµРЅР° РЅР° {cost_to_subtract:.2f}")
             return True
         except Exception as e:
-            print(f"Ошибка отмены записи: {e}")
+            print(f"РћС€РёР±РєР° РѕС‚РјРµРЅС‹ Р·Р°РїРёСЃРё: {e}")
             import traceback
             traceback.print_exc()
             return False
 
     @Slot(int, float, str, str, str, float, result=bool)
     def sellFinishedGoodWithShipping(self, finished_good_id, sale_price, buyer, inv_number, sale_date, shipping_cost):
-        """Продажа с учётом транспортировки."""
+        """РџСЂРѕРґР°Р¶Р° СЃ СѓС‡С‘С‚РѕРј С‚СЂР°РЅСЃРїРѕСЂС‚РёСЂРѕРІРєРё."""
         try:
             from datetime import datetime, date
             
@@ -916,13 +1012,13 @@ class BackendController(QObject):
                     cur.execute("SELECT cost_price FROM finished_goods WHERE id = %s", (finished_good_id,))
                     cost_row = cur.fetchone()
                     if not cost_row:
-                        print("Станок не найден")
+                        print("РЎС‚Р°РЅРѕРє РЅРµ РЅР°Р№РґРµРЅ")
                         return False
                     
                     cost = cost_row[0]
                     shipping_cost_decimal = Decimal(str(shipping_cost))
                     
-                    # Если доставка платная — добавляем к себестоимости
+                    # Р•СЃР»Рё РґРѕСЃС‚Р°РІРєР° РїР»Р°С‚РЅР°СЏ вЂ” РґРѕР±Р°РІР»СЏРµРј Рє СЃРµР±РµСЃС‚РѕРёРјРѕСЃС‚Рё
                     if shipping_cost_decimal > 0:
                         cur.execute("""
                             UPDATE finished_goods
@@ -950,9 +1046,9 @@ class BackendController(QObject):
                         WHERE id = %s
                     """, (buyer, sale_date_obj, inv_number if inv_number else None, finished_good_id))
 
-                    notes = f"Продажа станка ID {finished_good_id} покупателю {buyer}"
+                    notes = f"РџСЂРѕРґР°Р¶Р° СЃС‚Р°РЅРєР° ID {finished_good_id} РїРѕРєСѓРїР°С‚РµР»СЋ {buyer}"
                     if shipping_cost_decimal > 0:
-                        notes += f" (доставка {shipping_cost_decimal} ₽ включена в себестоимость)"
+                        notes += f" (РґРѕСЃС‚Р°РІРєР° {shipping_cost_decimal} в‚Ѕ РІРєР»СЋС‡РµРЅР° РІ СЃРµР±РµСЃС‚РѕРёРјРѕСЃС‚СЊ)"
 
                     cur.execute("""
                         INSERT INTO balance (date, income, notes)
@@ -962,18 +1058,18 @@ class BackendController(QObject):
                     conn.commit()
             return True
         except Exception as e:
-            print(f"Ошибка продажи: {e}")
+            print(f"РћС€РёР±РєР° РїСЂРѕРґР°Р¶Рё: {e}")
             import traceback
             traceback.print_exc()
         return False
 
     @Slot(int, result="QVariantList")
     def checkMaterialsForMachine(self, finished_good_id):
-        """Проверяет наличие материалов для завершения производства станка."""
+        """РџСЂРѕРІРµСЂСЏРµС‚ РЅР°Р»РёС‡РёРµ РјР°С‚РµСЂРёР°Р»РѕРІ РґР»СЏ Р·Р°РІРµСЂС€РµРЅРёСЏ РїСЂРѕРёР·РІРѕРґСЃС‚РІР° СЃС‚Р°РЅРєР°."""
         try:
             with get_connection() as conn:
                 with conn.cursor() as cur:
-                    # Получаем machine_id из finished_goods
+                    # РџРѕР»СѓС‡Р°РµРј machine_id РёР· finished_goods
                     cur.execute("""
                         SELECT machine_id FROM finished_goods WHERE id = %s
                     """, (finished_good_id,))
@@ -983,7 +1079,7 @@ class BackendController(QObject):
                     
                     machine_id = row[0]
                     
-                    # Проверяем материалы
+                    # РџСЂРѕРІРµСЂСЏРµРј РјР°С‚РµСЂРёР°Р»С‹
                     cur.execute("""
                         SELECT 
                             m.name,
@@ -1012,32 +1108,32 @@ class BackendController(QObject):
                         for r in rows
                     ]
         except Exception as e:
-            print(f"Ошибка проверки материалов: {e}")
+            print(f"РћС€РёР±РєР° РїСЂРѕРІРµСЂРєРё РјР°С‚РµСЂРёР°Р»РѕРІ: {e}")
             import traceback
             traceback.print_exc()
             return []
 
     @Slot(int, result=str)
     def getDisassemblePreview(self, finished_good_id):
-        """Показывает предпросмотр что вернётся на склад при разборке."""
+        """РџРѕРєР°Р·С‹РІР°РµС‚ РїСЂРµРґРїСЂРѕСЃРјРѕС‚СЂ С‡С‚Рѕ РІРµСЂРЅС‘С‚СЃСЏ РЅР° СЃРєР»Р°Рґ РїСЂРё СЂР°Р·Р±РѕСЂРєРµ."""
         try:
             with get_connection() as conn:
                 with conn.cursor() as cur:
-                    # Получаем информацию о станке
+                    # РџРѕР»СѓС‡Р°РµРј РёРЅС„РѕСЂРјР°С†РёСЋ Рѕ СЃС‚Р°РЅРєРµ
                     cur.execute("""
                         SELECT machine_model, machine_id FROM finished_goods WHERE id = %s
                     """, (finished_good_id,))
                     row = cur.fetchone()
                     if not row:
-                        return "Станок не найден"
+                        return "РЎС‚Р°РЅРѕРє РЅРµ РЅР°Р№РґРµРЅ"
                     
                     model, machine_id = row
                     
-                    preview = f"Станок: {model} (ID {finished_good_id})\n\n"
-                    preview += "МАТЕРИАЛЫ, КОТОРЫЕ ВЕРНУТСЯ НА СКЛАД:\n"
+                    preview = f"РЎС‚Р°РЅРѕРє: {model} (ID {finished_good_id})\n\n"
+                    preview += "РњРђРўР•Р РРђР›Р«, РљРћРўРћР Р«Р• Р’Р•Р РќРЈРўРЎРЇ РќРђ РЎРљР›РђР”:\n"
                     preview += "=" * 60 + "\n"
                     
-                    # Получаем материалы из спецификации
+                    # РџРѕР»СѓС‡Р°РµРј РјР°С‚РµСЂРёР°Р»С‹ РёР· СЃРїРµС†РёС„РёРєР°С†РёРё
                     cur.execute("""
                         SELECT 
                             m.name,
@@ -1054,9 +1150,9 @@ class BackendController(QObject):
                     materials = cur.fetchall()
                     
                     if not materials:
-                        preview += "Нет материалов для возврата\n"
+                        preview += "РќРµС‚ РјР°С‚РµСЂРёР°Р»РѕРІ РґР»СЏ РІРѕР·РІСЂР°С‚Р°\n"
                     else:
-                        preview += f"{'Материал':<35} {'Вернётся':>10} {'Сейчас':>10} {'Станет':>10}\n"
+                        preview += f"{'РњР°С‚РµСЂРёР°Р»':<35} {'Р’РµСЂРЅС‘С‚СЃСЏ':>10} {'РЎРµР№С‡Р°СЃ':>10} {'РЎС‚Р°РЅРµС‚':>10}\n"
                         preview += "-" * 60 + "\n"
                         
                         for name, qty, current, after in materials:
@@ -1064,7 +1160,7 @@ class BackendController(QObject):
                         
                         preview += "=" * 60 + "\n"
                     
-                    # Информация о работе (не вернётся)
+                    # РРЅС„РѕСЂРјР°С†РёСЏ Рѕ СЂР°Р±РѕС‚Рµ (РЅРµ РІРµСЂРЅС‘С‚СЃСЏ)
                     cur.execute("""
                         SELECT SUM(wl.hours * e.hourly_rate)
                         FROM work_logs wl
@@ -1076,34 +1172,34 @@ class BackendController(QObject):
                     labor_cost = cur.fetchone()[0] or Decimal('0')
                     
                     if labor_cost > 0:
-                        preview += f"\nВНИМАНИЕ: Затраты на работу ({labor_cost:.2f} ₽) НЕ возмещаются!\n"
+                        preview += f"\nР’РќРРњРђРќРР•: Р—Р°С‚СЂР°С‚С‹ РЅР° СЂР°Р±РѕС‚Сѓ ({labor_cost:.2f} в‚Ѕ) РќР• РІРѕР·РјРµС‰Р°СЋС‚СЃСЏ!\n"
                     
-                    preview += "\nСтанок будет удалён из базы данных."
+                    preview += "\nРЎС‚Р°РЅРѕРє Р±СѓРґРµС‚ СѓРґР°Р»С‘РЅ РёР· Р±Р°Р·С‹ РґР°РЅРЅС‹С…."
                     
                     return preview
                     
         except Exception as e:
-            print(f"Ошибка предпросмотра разборки: {e}")
-            return f"Ошибка: {str(e)}"
+            print(f"РћС€РёР±РєР° РїСЂРµРґРїСЂРѕСЃРјРѕС‚СЂР° СЂР°Р·Р±РѕСЂРєРё: {e}")
+            return f"РћС€РёР±РєР°: {str(e)}"
 
     @Slot(int, result=bool)
     def disassembleMachine(self, finished_good_id):
-        """Разбирает станок и возвращает материалы на склад."""
+        """Р Р°Р·Р±РёСЂР°РµС‚ СЃС‚Р°РЅРѕРє Рё РІРѕР·РІСЂР°С‰Р°РµС‚ РјР°С‚РµСЂРёР°Р»С‹ РЅР° СЃРєР»Р°Рґ."""
         try:
             with get_connection() as conn:
                 with conn.cursor() as cur:
-                    # Получаем machine_id
+                    # РџРѕР»СѓС‡Р°РµРј machine_id
                     cur.execute("""
                         SELECT machine_id FROM finished_goods WHERE id = %s AND status = 'completed'
                     """, (finished_good_id,))
                     row = cur.fetchone()
                     if not row:
-                        print("Станок не найден или уже продан")
+                        print("РЎС‚Р°РЅРѕРє РЅРµ РЅР°Р№РґРµРЅ РёР»Рё СѓР¶Рµ РїСЂРѕРґР°РЅ")
                         return False
                     
                     machine_id = row[0]
                     
-                    # Получаем материалы из спецификации
+                    # РџРѕР»СѓС‡Р°РµРј РјР°С‚РµСЂРёР°Р»С‹ РёР· СЃРїРµС†РёС„РёРєР°С†РёРё
                     cur.execute("""
                         SELECT material_id, quantity
                         FROM machine_materials
@@ -1111,7 +1207,7 @@ class BackendController(QObject):
                     """, (machine_id,))
                     materials = cur.fetchall()
                     
-                    # Возвращаем материалы на склад
+                    # Р’РѕР·РІСЂР°С‰Р°РµРј РјР°С‚РµСЂРёР°Р»С‹ РЅР° СЃРєР»Р°Рґ
                     for material_id, quantity in materials:
                         cur.execute("""
                             INSERT INTO material_inventory (material_id, quantity)
@@ -1120,69 +1216,360 @@ class BackendController(QObject):
                             DO UPDATE SET quantity = material_inventory.quantity + EXCLUDED.quantity
                         """, (material_id, quantity))
                         
-                        # Добавляем транзакцию
+                        # Р”РѕР±Р°РІР»СЏРµРј С‚СЂР°РЅР·Р°РєС†РёСЋ
                         cur.execute("""
                             INSERT INTO material_transactions (material_id, quantity_change, transaction_type, reference_id)
                             VALUES (%s, %s, 'disassembly', %s)
                         """, (material_id, quantity, finished_good_id))
                     
-                    # Удаляем связи с амортизацией инструментов
+                    # РЈРґР°Р»СЏРµРј СЃРІСЏР·Рё СЃ Р°РјРѕСЂС‚РёР·Р°С†РёРµР№ РёРЅСЃС‚СЂСѓРјРµРЅС‚РѕРІ
                     cur.execute("DELETE FROM tool_depreciation WHERE finished_good_id = %s", (finished_good_id,))
                     
-                    # Удаляем связи с работой
+                    # РЈРґР°Р»СЏРµРј СЃРІСЏР·Рё СЃ СЂР°Р±РѕС‚РѕР№
                     cur.execute("DELETE FROM finished_good_labor WHERE finished_good_id = %s", (finished_good_id,))
                     
-                    # Удаляем станок
+                    # РЈРґР°Р»СЏРµРј СЃС‚Р°РЅРѕРє
                     cur.execute("DELETE FROM finished_goods WHERE id = %s", (finished_good_id,))
                     
                     conn.commit()
-                    print(f"Станок ID {finished_good_id} разобран, материалы возвращены на склад")
+                    print(f"РЎС‚Р°РЅРѕРє ID {finished_good_id} СЂР°Р·РѕР±СЂР°РЅ, РјР°С‚РµСЂРёР°Р»С‹ РІРѕР·РІСЂР°С‰РµРЅС‹ РЅР° СЃРєР»Р°Рґ")
                     
             return True
         except Exception as e:
-            print(f"Ошибка разборки станка: {e}")
+            print(f"РћС€РёР±РєР° СЂР°Р·Р±РѕСЂРєРё СЃС‚Р°РЅРєР°: {e}")
             import traceback
             traceback.print_exc()
             return False
 
     @Slot(int, result=bool)
     def deleteMachine(self, finished_good_id):
-        """Удаляет станок БЕЗ возврата материалов."""
+        """РЈРґР°Р»СЏРµС‚ СЃС‚Р°РЅРѕРє Р‘Р•Р— РІРѕР·РІСЂР°С‚Р° РјР°С‚РµСЂРёР°Р»РѕРІ."""
         try:
             with get_connection() as conn:
                 with conn.cursor() as cur:
-                    # Проверяем что станок на складе
+                    # РџСЂРѕРІРµСЂСЏРµРј С‡С‚Рѕ СЃС‚Р°РЅРѕРє РЅР° СЃРєР»Р°РґРµ
                     cur.execute("""
                         SELECT status FROM finished_goods WHERE id = %s
                     """, (finished_good_id,))
                     row = cur.fetchone()
                     if not row:
-                        print("Станок не найден")
+                        print("РЎС‚Р°РЅРѕРє РЅРµ РЅР°Р№РґРµРЅ")
                         return False
                     
                     if row[0] == 'sold':
-                        print("Нельзя удалить проданный станок")
+                        print("РќРµР»СЊР·СЏ СѓРґР°Р»РёС‚СЊ РїСЂРѕРґР°РЅРЅС‹Р№ СЃС‚Р°РЅРѕРє")
                         return False
                     
-                    # Удаляем связи с работой
+                    # РЈРґР°Р»СЏРµРј СЃРІСЏР·Рё СЃ СЂР°Р±РѕС‚РѕР№
                     cur.execute("""
                         DELETE FROM finished_good_labor WHERE finished_good_id = %s
                     """, (finished_good_id,))
                     
-                    # Удаляем станок
+                    # РЈРґР°Р»СЏРµРј СЃС‚Р°РЅРѕРє
                     cur.execute("""
                         DELETE FROM finished_goods WHERE id = %s
                     """, (finished_good_id,))
                     
                     conn.commit()
-                    print(f"Станок ID {finished_good_id} удалён")
+                    print(f"РЎС‚Р°РЅРѕРє ID {finished_good_id} СѓРґР°Р»С‘РЅ")
                     
             return True
         except Exception as e:
-            print(f"Ошибка удаления станка: {e}")
+            print(f"РћС€РёР±РєР° СѓРґР°Р»РµРЅРёСЏ СЃС‚Р°РЅРєР°: {e}")
             import traceback
             traceback.print_exc()
             return False
+
+    @Slot(int, str, float, result=bool)
+    def updateFinishedGood(self, finished_good_id, produced_date_str, indirect_cost):
+        try:
+            from datetime import datetime
+            self._ensure_indirect_schema()
+            produced_date = datetime.strptime(produced_date_str, "%Y-%m-%d").date()
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        UPDATE finished_goods
+                        SET produced_date = %s,
+                            indirect_cost = %s
+                        WHERE id = %s AND status = 'completed'
+                    """, (produced_date, Decimal(str(indirect_cost)), finished_good_id))
+                    cur.execute("""
+                        UPDATE finished_goods fg
+                        SET cost_price = COALESCE(base.base_cost, 0) + COALESCE(fg.indirect_cost, 0)
+                        FROM (
+                            SELECT
+                                fg2.id AS finished_good_id,
+                                COALESCE(SUM(mm.quantity * p.price_per_unit), 0) +
+                                COALESCE((
+                                    SELECT SUM(fgl.hours_worked * e.hourly_rate)
+                                    FROM finished_good_labor fgl
+                                    JOIN work_logs wl ON wl.id = fgl.work_log_id
+                                    JOIN employees e ON e.id = wl.employee_id
+                                    WHERE fgl.finished_good_id = fg2.id
+                                ), 0) +
+                                COALESCE((
+                                    SELECT SUM(COALESCE(t.monthly_depreciation, 0))
+                                    FROM machine_tools mt
+                                    JOIN tools t ON t.id = mt.tool_id
+                                    WHERE mt.machine_id = fg2.machine_id
+                                ), 0) AS base_cost
+                            FROM finished_goods fg2
+                            LEFT JOIN machines m ON m.id = fg2.machine_id
+                            LEFT JOIN machine_materials mm ON mm.machine_id = m.id
+                            LEFT JOIN LATERAL (
+                                SELECT price_per_unit
+                                FROM purchases
+                                WHERE material_id = mm.material_id
+                                ORDER BY purchase_date DESC, id DESC
+                                LIMIT 1
+                            ) p ON TRUE
+                            WHERE fg2.id = %s
+                            GROUP BY fg2.id
+                        ) base
+                        WHERE fg.id = base.finished_good_id
+                    """, (finished_good_id,))
+                    conn.commit()
+            return True
+        except Exception as e:
+            print(f"Ошибка обновления готового станка: {e}")
+            return False
+
+    @Slot(result="QVariantList")
+    def getIndirectCategories(self):
+        try:
+            self._ensure_indirect_schema()
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT id, name, monthly_amount, is_active, notes
+                        FROM indirect_expense_categories
+                        ORDER BY name
+                    """)
+                    rows = cur.fetchall()
+            return [
+                {"id": r[0], "name": r[1], "monthly_amount": float(r[2]), "is_active": bool(r[3]), "notes": r[4] or ""}
+                for r in rows
+            ]
+        except Exception as e:
+            print(f"Ошибка получения косвенных категорий: {e}")
+            return []
+
+    @Slot(str, float, bool, str, result=bool)
+    def addIndirectCategory(self, name, amount, is_active, notes):
+        try:
+            self._ensure_indirect_schema()
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        INSERT INTO indirect_expense_categories (name, monthly_amount, is_active, notes)
+                        VALUES (%s, %s, %s, %s)
+                    """, (name, Decimal(str(amount)), is_active, notes if notes else None))
+                    conn.commit()
+            return True
+        except Exception as e:
+            print(f"Ошибка добавления косвенной категории: {e}")
+            return False
+
+    @Slot(int, str, float, bool, str, result=bool)
+    def updateIndirectCategory(self, category_id, name, amount, is_active, notes):
+        try:
+            self._ensure_indirect_schema()
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        UPDATE indirect_expense_categories
+                        SET name = %s, monthly_amount = %s, is_active = %s, notes = %s
+                        WHERE id = %s
+                    """, (name, Decimal(str(amount)), is_active, notes if notes else None, category_id))
+                    conn.commit()
+            return True
+        except Exception as e:
+            print(f"Ошибка обновления косвенной категории: {e}")
+            return False
+
+    @Slot(int, result=bool)
+    def deleteIndirectCategory(self, category_id):
+        try:
+            self._ensure_indirect_schema()
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("DELETE FROM indirect_expense_categories WHERE id = %s", (category_id,))
+                    conn.commit()
+            return True
+        except Exception as e:
+            print(f"Ошибка удаления косвенной категории: {e}")
+            return False
+
+    @Slot(str, result=bool)
+    def recalculateIndirectExpenses(self, month_str):
+        try:
+            import calendar
+            from datetime import date, timedelta
+            self._ensure_indirect_schema()
+            year, month = [int(x) for x in month_str.split("-")]
+            _, days_in_month = calendar.monthrange(year, month)
+            month_start = date(year, month, 1)
+            month_end = date(year, month, days_in_month)
+
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        DELETE FROM indirect_cost_allocations
+                        WHERE allocation_date BETWEEN %s AND %s
+                    """, (month_start, month_end))
+
+                    cur.execute("""
+                        SELECT id, monthly_amount
+                        FROM indirect_expense_categories
+                        WHERE is_active = TRUE
+                    """)
+                    categories = cur.fetchall()
+
+                    for cat_id, monthly_amount in categories:
+                        day_rate = (monthly_amount or Decimal('0')) / Decimal(days_in_month)
+                        day = month_start
+                        while day <= month_end:
+                            cur.execute("""
+                                SELECT id
+                                FROM finished_goods
+                                WHERE start_date <= %s
+                                  AND (
+                                      (status = 'in_progress' AND %s <= CURRENT_DATE)
+                                      OR
+                                      (status <> 'in_progress' AND produced_date IS NOT NULL AND produced_date >= %s)
+                                  )
+                            """, (day, day, day))
+                            fg_ids = [r[0] for r in cur.fetchall()]
+                            if fg_ids:
+                                per_machine = day_rate / Decimal(len(fg_ids))
+                                for fg_id in fg_ids:
+                                    cur.execute("""
+                                        INSERT INTO indirect_cost_allocations (category_id, finished_good_id, allocation_date, amount)
+                                        VALUES (%s, %s, %s, %s)
+                                    """, (cat_id, fg_id, day, per_machine))
+                            day += timedelta(days=1)
+
+                    cur.execute("UPDATE finished_goods SET indirect_cost = 0")
+                    cur.execute("""
+                        UPDATE finished_goods fg
+                        SET indirect_cost = t.sum_indirect
+                        FROM (
+                            SELECT finished_good_id, COALESCE(SUM(amount), 0)::DECIMAL(12,2) AS sum_indirect
+                            FROM indirect_cost_allocations
+                            GROUP BY finished_good_id
+                        ) t
+                        WHERE fg.id = t.finished_good_id
+                    """)
+                    cur.execute("""
+                        UPDATE finished_goods fg
+                        SET cost_price = COALESCE(base.base_cost, 0) + COALESCE(fg.indirect_cost, 0)
+                        FROM (
+                            SELECT
+                                fg2.id AS finished_good_id,
+                                COALESCE(SUM(mm.quantity * p.price_per_unit), 0) +
+                                COALESCE((
+                                    SELECT SUM(fgl.hours_worked * e.hourly_rate)
+                                    FROM finished_good_labor fgl
+                                    JOIN work_logs wl ON wl.id = fgl.work_log_id
+                                    JOIN employees e ON e.id = wl.employee_id
+                                    WHERE fgl.finished_good_id = fg2.id
+                                ), 0) +
+                                COALESCE((
+                                    SELECT SUM(COALESCE(t.monthly_depreciation, 0))
+                                    FROM machine_tools mt
+                                    JOIN tools t ON t.id = mt.tool_id
+                                    WHERE mt.machine_id = fg2.machine_id
+                                ), 0) AS base_cost
+                            FROM finished_goods fg2
+                            LEFT JOIN machines m ON m.id = fg2.machine_id
+                            LEFT JOIN machine_materials mm ON mm.machine_id = m.id
+                            LEFT JOIN LATERAL (
+                                SELECT price_per_unit
+                                FROM purchases
+                                WHERE material_id = mm.material_id
+                                ORDER BY purchase_date DESC, id DESC
+                                LIMIT 1
+                            ) p ON TRUE
+                            GROUP BY fg2.id
+                        ) base
+                        WHERE fg.id = base.finished_good_id
+                    """)
+                    conn.commit()
+            return True
+        except Exception as e:
+            print(f"Ошибка пересчёта косвенных расходов: {e}")
+            return False
+
+    @Slot(str, result="QVariantList")
+    def getIndirectAllocations(self, month_str):
+        try:
+            import calendar
+            from datetime import date
+            self._ensure_indirect_schema()
+            year, month = [int(x) for x in month_str.split("-")]
+            _, days_in_month = calendar.monthrange(year, month)
+            month_start = date(year, month, 1)
+            month_end = date(year, month, days_in_month)
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT c.name, a.allocation_date, fg.machine_model, a.amount, fg.id
+                        FROM indirect_cost_allocations a
+                        JOIN indirect_expense_categories c ON c.id = a.category_id
+                        JOIN finished_goods fg ON fg.id = a.finished_good_id
+                        WHERE a.allocation_date BETWEEN %s AND %s
+                        ORDER BY a.allocation_date DESC, c.name, fg.machine_model
+                    """, (month_start, month_end))
+                    rows = cur.fetchall()
+            return [{"category": r[0], "date": str(r[1]), "machine_model": r[2], "amount": float(r[3]), "finished_good_id": r[4]} for r in rows]
+        except Exception as e:
+            print(f"Ошибка получения распределений косвенных расходов: {e}")
+            return []
+
+    @Slot(str, str, result="QVariantList")
+    def getIndirectAllocationsByPeriod(self, date_from_str, date_to_str):
+        try:
+            from datetime import datetime
+            self._ensure_indirect_schema()
+            date_from = datetime.strptime(date_from_str, "%Y-%m-%d").date()
+            date_to = datetime.strptime(date_to_str, "%Y-%m-%d").date()
+            if date_to < date_from:
+                date_from, date_to = date_to, date_from
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT c.name, a.allocation_date, fg.machine_model, a.amount, fg.id
+                        FROM indirect_cost_allocations a
+                        JOIN indirect_expense_categories c ON c.id = a.category_id
+                        JOIN finished_goods fg ON fg.id = a.finished_good_id
+                        WHERE a.allocation_date BETWEEN %s AND %s
+                        ORDER BY a.allocation_date DESC, c.name, fg.machine_model
+                    """, (date_from, date_to))
+                    rows = cur.fetchall()
+            return [{"category": r[0], "date": str(r[1]), "machine_model": r[2], "amount": float(r[3]), "finished_good_id": r[4]} for r in rows]
+        except Exception as e:
+            print(f"Ошибка получения косвенных расходов за период: {e}")
+            return []
+
+    @Slot(int, result="QVariantList")
+    def getMachineIndirectCostDetails(self, finished_good_id):
+        try:
+            self._ensure_indirect_schema()
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT c.name, a.allocation_date, a.amount
+                        FROM indirect_cost_allocations a
+                        JOIN indirect_expense_categories c ON c.id = a.category_id
+                        WHERE a.finished_good_id = %s
+                        ORDER BY a.allocation_date, c.name
+                    """, (finished_good_id,))
+                    rows = cur.fetchall()
+            return [{"category": r[0], "date": str(r[1]), "amount": float(r[2])} for r in rows]
+        except Exception as e:
+            print(f"Ошибка детализации косвенных расходов: {e}")
+            return []
 
     @Slot(str, str)
     def exportReportToExcel(self, start_date_str, end_date_str):
@@ -1196,8 +1583,9 @@ class BackendController(QObject):
                 df_production = pd.read_sql_query("SELECT * FROM finished_goods WHERE produced_date BETWEEN %s AND %s", conn, params=(start, end))
                 filename = f"report_{start}_{end}.xlsx"
                 with pd.ExcelWriter(filename) as writer:
-                    df_sales.to_excel(writer, sheet_name="Продажи", index=False)
-                    df_production.to_excel(writer, sheet_name="Производство", index=False)
-            print(f"Отчёт сохранён в {filename}")
+                    df_sales.to_excel(writer, sheet_name="РџСЂРѕРґР°Р¶Рё", index=False)
+                    df_production.to_excel(writer, sheet_name="РџСЂРѕРёР·РІРѕРґСЃС‚РІРѕ", index=False)
+            print(f"РћС‚С‡С‘С‚ СЃРѕС…СЂР°РЅС‘РЅ РІ {filename}")
         except Exception as e:
-            print(f"Ошибка экспорта: {e}")
+            print(f"РћС€РёР±РєР° СЌРєСЃРїРѕСЂС‚Р°: {e}")
+

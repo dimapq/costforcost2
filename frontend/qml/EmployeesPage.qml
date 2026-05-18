@@ -402,7 +402,15 @@ Page {
                                 employeeId > 0 ? employeeId : null
                             )
                             for (var i = 0; i < history.length; i++) {
-                                workHistoryModel.append(history[i])
+                                var h = history[i] || {}
+                                workHistoryModel.append({
+                                    "work_log_id": h.work_log_id !== undefined ? h.work_log_id : -1,
+                                    "date": h.date !== undefined ? h.date : "",
+                                    "employee_name": h.employee_name !== undefined ? h.employee_name : "",
+                                    "machine_model": h.machine_model !== undefined ? h.machine_model : "",
+                                    "hours": h.hours !== undefined ? h.hours : 0,
+                                    "cost": h.cost !== undefined ? h.cost : 0
+                                })
                             }
                         }
 

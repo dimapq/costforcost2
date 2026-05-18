@@ -85,6 +85,15 @@ Page {
                             deleteMaterialDialog.open()
                         }
                     }
+                    Button {
+                        text: "Изменить цену за ед."
+                        enabled: materialsTab.selectedMaterialId > 0
+                        onClicked: {
+                            newUnitPriceField.clear()
+                            unitPriceNoteField.clear()
+                            updatePriceDialog.open()
+                        }
+                    }
                 }
 
                 // Таблица материалов
@@ -332,6 +341,45 @@ Page {
                         materialsTab.selectedMaterialName = ""
                         materialsTab.selectedMaterialQty = 0
                         deleteReasonField.clear()
+                    }
+                }
+            }
+
+            Dialog {
+                id: updatePriceDialog
+                title: "Изменить цену за единицу"
+                standardButtons: Dialog.Ok | Dialog.Cancel
+                width: 420
+                height: 220
+
+                ColumnLayout {
+                    anchors.fill: parent
+                    spacing: 10
+                    Label { text: "Материал: " + materialsTab.selectedMaterialName }
+                    Label { text: "Новая цена за единицу:" }
+                    TextField {
+                        id: newUnitPriceField
+                        Layout.fillWidth: true
+                        validator: DoubleValidator { bottom: 0.01 }
+                    }
+                    Label { text: "Примечание (необязательно):" }
+                    TextField {
+                        id: unitPriceNoteField
+                        Layout.fillWidth: true
+                        placeholderText: "Например: новая закупочная цена"
+                    }
+                }
+
+                onAccepted: {
+                    if (materialsTab.selectedMaterialId > 0 && newUnitPriceField.text) {
+                        backend.updateMaterialUnitPrice(
+                            materialsTab.selectedMaterialId,
+                            parseFloat(newUnitPriceField.text),
+                            unitPriceNoteField.text
+                        )
+                        materialModel.refresh()
+                        newUnitPriceField.clear()
+                        unitPriceNoteField.clear()
                     }
                 }
             }

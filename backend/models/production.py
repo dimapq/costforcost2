@@ -1,4 +1,4 @@
-# backend/models/production.py
+﻿# backend/models/production.py
 from decimal import Decimal
 from backend.db.connection import get_connection
 from backend.models.machine import calculate_machine_cost_from_purchases
@@ -18,9 +18,9 @@ def check_material_availability(machine_id, quantity=1):
             """, (quantity, machine_id, quantity))
             shortages = cur.fetchall()
             if shortages:
-                print("Недостаточно материалов на складе:")
+                print("РќРµРґРѕСЃС‚Р°С‚РѕС‡РЅРѕ РјР°С‚РµСЂРёР°Р»РѕРІ РЅР° СЃРєР»Р°РґРµ:")
                 for name, req, avail in shortages:
-                    print(f"  - {name}: требуется {req}, в наличии {avail}")
+                    print(f"  - {name}: С‚СЂРµР±СѓРµС‚СЃСЏ {req}, РІ РЅР°Р»РёС‡РёРё {avail}")
                 return False
             return True
 
@@ -31,6 +31,8 @@ def _produce_machine_impl(machine_id, quantity=1, notes=None, ask_labor=False):
 
     with get_connection() as conn:
         with conn.cursor() as cur:
+            cur.execute("ALTER TABLE IF EXISTS finished_goods ADD COLUMN IF NOT EXISTS start_date DATE")
+            cur.execute("ALTER TABLE IF EXISTS finished_goods ADD COLUMN IF NOT EXISTS indirect_cost DECIMAL(12, 2) DEFAULT 0")
             cur.execute("SELECT model FROM machines WHERE id = %s", (machine_id,))
             model = cur.fetchone()[0]
             material_cost_per_unit = calculate_machine_cost_from_purchases(machine_id)
@@ -92,16 +94,16 @@ def _produce_machine_impl(machine_id, quantity=1, notes=None, ask_labor=False):
             conn.commit()
 
             final_unit_cost = total_unit_cost_before_tools + (total_tool_depr / quantity if quantity else 0)
-            print(f"Произведено {quantity} шт. станка '{model}'.")
-            print(f"Себестоимость единицы: {final_unit_cost:.2f} руб.")
-            print(f"  - материалы: {material_cost_per_unit:.2f}")
-            print(f"  - работа (план): {labor_cost_per_unit:.2f}")
-            print(f"  - амортизация инструментов: {total_tool_depr/quantity:.2f}")
+            print(f"РџСЂРѕРёР·РІРµРґРµРЅРѕ {quantity} С€С‚. СЃС‚Р°РЅРєР° '{model}'.")
+            print(f"РЎРµР±РµСЃС‚РѕРёРјРѕСЃС‚СЊ РµРґРёРЅРёС†С‹: {final_unit_cost:.2f} СЂСѓР±.")
+            print(f"  - РјР°С‚РµСЂРёР°Р»С‹: {material_cost_per_unit:.2f}")
+            print(f"  - СЂР°Р±РѕС‚Р° (РїР»Р°РЅ): {labor_cost_per_unit:.2f}")
+            print(f"  - Р°РјРѕСЂС‚РёР·Р°С†РёСЏ РёРЅСЃС‚СЂСѓРјРµРЅС‚РѕРІ: {total_tool_depr/quantity:.2f}")
 
             if ask_labor:
                 from backend.models.labor import add_labor_to_finished_good
                 for fg_id in new_fg_ids:
-                    print(f"\n--- Учёт работы для станка ID {fg_id} ---")
+                    print(f"\n--- РЈС‡С‘С‚ СЂР°Р±РѕС‚С‹ РґР»СЏ СЃС‚Р°РЅРєР° ID {fg_id} ---")
                     add_labor_to_finished_good(fg_id)
 
             return True, new_fg_ids
@@ -110,11 +112,11 @@ def _produce_machine_impl(machine_id, quantity=1, notes=None, ask_labor=False):
 def produce_machine(machine_id, quantity=1, notes=None):
     success, fg_ids = _produce_machine_impl(machine_id, quantity, notes, ask_labor=False)
     if success:
-        add_labor_now = input("Добавить фактические трудозатраты сейчас? (y/n): ").strip().lower()
+        add_labor_now = input("Р”РѕР±Р°РІРёС‚СЊ С„Р°РєС‚РёС‡РµСЃРєРёРµ С‚СЂСѓРґРѕР·Р°С‚СЂР°С‚С‹ СЃРµР№С‡Р°СЃ? (y/n): ").strip().lower()
         if add_labor_now == 'y':
             from backend.models.labor import add_labor_to_finished_good
             for fg_id in fg_ids:
-                print(f"\n--- Учёт работы для станка ID {fg_id} ---")
+                print(f"\n--- РЈС‡С‘С‚ СЂР°Р±РѕС‚С‹ РґР»СЏ СЃС‚Р°РЅРєР° ID {fg_id} ---")
                 add_labor_to_finished_good(fg_id)
     return success
 
@@ -135,18 +137,18 @@ def sell_finished_good():
             """)
             items = cur.fetchall()
             if not items:
-                print("Нет готовых станков на складе.")
+                print("РќРµС‚ РіРѕС‚РѕРІС‹С… СЃС‚Р°РЅРєРѕРІ РЅР° СЃРєР»Р°РґРµ.")
                 return
-            print("\n=== Готовые станки в наличии ===")
+            print("\n=== Р“РѕС‚РѕРІС‹Рµ СЃС‚Р°РЅРєРё РІ РЅР°Р»РёС‡РёРё ===")
             for fg_id, model, cost, prod_date in items:
-                print(f"ID: {fg_id} | Модель: {model} | Себестоимость: {cost:.2f} | Произведён: {prod_date}")
+                print(f"ID: {fg_id} | РњРѕРґРµР»СЊ: {model} | РЎРµР±РµСЃС‚РѕРёРјРѕСЃС‚СЊ: {cost:.2f} | РџСЂРѕРёР·РІРµРґС‘РЅ: {prod_date}")
             try:
-                fg_id = int(input("Введите ID готового станка для продажи (0 для отмены): "))
+                fg_id = int(input("Р’РІРµРґРёС‚Рµ ID РіРѕС‚РѕРІРѕРіРѕ СЃС‚Р°РЅРєР° РґР»СЏ РїСЂРѕРґР°Р¶Рё (0 РґР»СЏ РѕС‚РјРµРЅС‹): "))
                 if fg_id == 0:
                     return
-                sale_price = Decimal(input("Введите цену продажи: "))
+                sale_price = Decimal(input("Р’РІРµРґРёС‚Рµ С†РµРЅСѓ РїСЂРѕРґР°Р¶Рё: "))
                 if sale_price <= 0:
-                    print("Цена должна быть положительной.")
+                    print("Р¦РµРЅР° РґРѕР»Р¶РЅР° Р±С‹С‚СЊ РїРѕР»РѕР¶РёС‚РµР»СЊРЅРѕР№.")
                     return
                 cur.execute("SELECT cost_price FROM finished_goods WHERE id = %s", (fg_id,))
                 cost = cur.fetchone()[0]
@@ -158,16 +160,16 @@ def sell_finished_good():
                 cur.execute("UPDATE finished_goods SET status = 'sold' WHERE id = %s", (fg_id,))
                 cur.execute("""
                     INSERT INTO balance (date, income, notes)
-                    VALUES (CURRENT_DATE, %s, 'Продажа станка ID ' || %s)
+                    VALUES (CURRENT_DATE, %s, 'РџСЂРѕРґР°Р¶Р° СЃС‚Р°РЅРєР° ID ' || %s)
                 """, (sale_price, fg_id))
                 conn.commit()
-                print(f"Продажа оформлена. Прибыль: {profit:.2f} руб.")
+                print(f"РџСЂРѕРґР°Р¶Р° РѕС„РѕСЂРјР»РµРЅР°. РџСЂРёР±С‹Р»СЊ: {profit:.2f} СЂСѓР±.")
             except ValueError:
-                print("Ошибка ввода.")
+                print("РћС€РёР±РєР° РІРІРѕРґР°.")
 
 
 def sell_finished_good_gui(finished_good_id, sale_price, buyer=None):
-    """GUI-версия продажи готового станка с указанием покупателя."""
+    """GUI-РІРµСЂСЃРёСЏ РїСЂРѕРґР°Р¶Рё РіРѕС‚РѕРІРѕРіРѕ СЃС‚Р°РЅРєР° СЃ СѓРєР°Р·Р°РЅРёРµРј РїРѕРєСѓРїР°С‚РµР»СЏ."""
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT cost_price FROM finished_goods WHERE id = %s", (finished_good_id,))
@@ -188,7 +190,7 @@ def sell_finished_good_gui(finished_good_id, sale_price, buyer=None):
             cur.execute("""
                 INSERT INTO balance (date, income, notes)
                 VALUES (CURRENT_DATE, %s, %s)
-            """, (sale_price, f"Продажа станка ID {finished_good_id} покупателю {buyer}"))
+            """, (sale_price, f"РџСЂРѕРґР°Р¶Р° СЃС‚Р°РЅРєР° ID {finished_good_id} РїРѕРєСѓРїР°С‚РµР»СЋ {buyer}"))
             conn.commit()
     return True
 
@@ -200,15 +202,15 @@ def plan_purchases():
         return
     machine_id, model = machine
     try:
-        qty_to_produce = int(input(f"Сколько станков '{model}' планируется произвести? "))
+        qty_to_produce = int(input(f"РЎРєРѕР»СЊРєРѕ СЃС‚Р°РЅРєРѕРІ '{model}' РїР»Р°РЅРёСЂСѓРµС‚СЃСЏ РїСЂРѕРёР·РІРµСЃС‚Рё? "))
         if qty_to_produce <= 0:
-            print("Количество должно быть положительным.")
+            print("РљРѕР»РёС‡РµСЃС‚РІРѕ РґРѕР»Р¶РЅРѕ Р±С‹С‚СЊ РїРѕР»РѕР¶РёС‚РµР»СЊРЅС‹Рј.")
             return
     except ValueError:
-        print("Неверное число.")
+        print("РќРµРІРµСЂРЅРѕРµ С‡РёСЃР»Рѕ.")
         return
 
-    print(f"\n=== План закупок для производства {qty_to_produce} шт. станка '{model}' ===\n")
+    print(f"\n=== РџР»Р°РЅ Р·Р°РєСѓРїРѕРє РґР»СЏ РїСЂРѕРёР·РІРѕРґСЃС‚РІР° {qty_to_produce} С€С‚. СЃС‚Р°РЅРєР° '{model}' ===\n")
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute("""
@@ -226,12 +228,12 @@ def plan_purchases():
             """, (qty_to_produce, qty_to_produce, machine_id))
             rows = cur.fetchall()
             if not rows:
-                print("Спецификация станка пуста.")
+                print("РЎРїРµС†РёС„РёРєР°С†РёСЏ СЃС‚Р°РЅРєР° РїСѓСЃС‚Р°.")
                 return
-            print(f"{'Материал':<40} {'Требуется':>12} {'В наличии':>12} {'Заказать':>12} {'Ед.':<5}")
+            print(f"{'РњР°С‚РµСЂРёР°Р»':<40} {'РўСЂРµР±СѓРµС‚СЃСЏ':>12} {'Р’ РЅР°Р»РёС‡РёРё':>12} {'Р—Р°РєР°Р·Р°С‚СЊ':>12} {'Р•Рґ.':<5}")
             print("-" * 85)
             for name, req, stock, order, unit in rows:
-                print(f"{name:<40} {req:>12.2f} {stock:>12.2f} {order:>12.2f} {unit or 'шт':<5}")
+                print(f"{name:<40} {req:>12.2f} {stock:>12.2f} {order:>12.2f} {unit or 'С€С‚':<5}")
             print("-" * 85)
             cur.execute("""
                 WITH latest_prices AS (
@@ -248,9 +250,9 @@ def plan_purchases():
             """, (qty_to_produce, machine_id))
             est_cost = cur.fetchone()[0] or Decimal('0.00')
             if est_cost > 0:
-                print(f"Примерная стоимость закупки недостающих материалов: {est_cost:.2f} руб.")
+                print(f"РџСЂРёРјРµСЂРЅР°СЏ СЃС‚РѕРёРјРѕСЃС‚СЊ Р·Р°РєСѓРїРєРё РЅРµРґРѕСЃС‚Р°СЋС‰РёС… РјР°С‚РµСЂРёР°Р»РѕРІ: {est_cost:.2f} СЂСѓР±.")
             else:
-                print("Все материалы в наличии, закупка не требуется.")
+                print("Р’СЃРµ РјР°С‚РµСЂРёР°Р»С‹ РІ РЅР°Р»РёС‡РёРё, Р·Р°РєСѓРїРєР° РЅРµ С‚СЂРµР±СѓРµС‚СЃСЏ.")
 
 
 def get_in_progress_machines():
@@ -267,15 +269,17 @@ def get_in_progress_machines():
 
 
 def start_production_gui(machine_id, quantity, notes):
-    """Создаёт станки со статусом 'in_progress'."""
+    """РЎРѕР·РґР°С‘С‚ СЃС‚Р°РЅРєРё СЃРѕ СЃС‚Р°С‚СѓСЃРѕРј 'in_progress'."""
     with get_connection() as conn:
         with conn.cursor() as cur:
+            cur.execute("ALTER TABLE IF EXISTS finished_goods ADD COLUMN IF NOT EXISTS start_date DATE")
+            cur.execute("ALTER TABLE IF EXISTS finished_goods ADD COLUMN IF NOT EXISTS indirect_cost DECIMAL(12, 2) DEFAULT 0")
             cur.execute("SELECT model FROM machines WHERE id = %s", (machine_id,))
             model = cur.fetchone()[0]
             for _ in range(quantity):
                 cur.execute("""
-                    INSERT INTO finished_goods (machine_model, machine_id, cost_price, produced_date, status, notes)
-                    VALUES (%s, %s, 0, CURRENT_DATE, 'in_progress', %s)
+                    INSERT INTO finished_goods (machine_model, machine_id, cost_price, produced_date, start_date, status, notes)
+                    VALUES (%s, %s, 0, CURRENT_DATE, CURRENT_DATE, 'in_progress', %s)
                 """, (model, machine_id, notes))
             conn.commit()
     return True
@@ -286,22 +290,22 @@ def set_machine_completed(finished_good_id, inventory_number=None):
         with conn.cursor() as cur:
             cur.execute("""
                 UPDATE finished_goods
-                SET status = 'completed', inventory_number = COALESCE(%s, inventory_number)
+                SET status = 'completed', produced_date = CURRENT_DATE, inventory_number = COALESCE(%s, inventory_number)
                 WHERE id = %s
             """, (inventory_number, finished_good_id))
             conn.commit()
 
 def complete_machine_with_material_deduction(finished_good_id, inventory_number=None):
     """
-    Завершает производство станка:
-    - Проверяет, что статус 'in_progress'
-    - Списывает материалы по спецификации модели
-    - Рассчитывает себестоимость (материалы + работа + амортизация)
-    - Обновляет finished_goods (cost_price, status='completed', inventory_number)
+    Р—Р°РІРµСЂС€Р°РµС‚ РїСЂРѕРёР·РІРѕРґСЃС‚РІРѕ СЃС‚Р°РЅРєР°:
+    - РџСЂРѕРІРµСЂСЏРµС‚, С‡С‚Рѕ СЃС‚Р°С‚СѓСЃ 'in_progress'
+    - РЎРїРёСЃС‹РІР°РµС‚ РјР°С‚РµСЂРёР°Р»С‹ РїРѕ СЃРїРµС†РёС„РёРєР°С†РёРё РјРѕРґРµР»Рё
+    - Р Р°СЃСЃС‡РёС‚С‹РІР°РµС‚ СЃРµР±РµСЃС‚РѕРёРјРѕСЃС‚СЊ (РјР°С‚РµСЂРёР°Р»С‹ + СЂР°Р±РѕС‚Р° + Р°РјРѕСЂС‚РёР·Р°С†РёСЏ)
+    - РћР±РЅРѕРІР»СЏРµС‚ finished_goods (cost_price, status='completed', inventory_number)
     """
     with get_connection() as conn:
         with conn.cursor() as cur:
-            # 1. Получаем данные о станке
+            # 1. РџРѕР»СѓС‡Р°РµРј РґР°РЅРЅС‹Рµ Рѕ СЃС‚Р°РЅРєРµ
             cur.execute("""
                 SELECT machine_id, machine_model
                 FROM finished_goods
@@ -309,11 +313,11 @@ def complete_machine_with_material_deduction(finished_good_id, inventory_number=
             """, (finished_good_id,))
             row = cur.fetchone()
             if not row:
-                print(f"Станок {finished_good_id} не найден или не в процессе")
+                print(f"РЎС‚Р°РЅРѕРє {finished_good_id} РЅРµ РЅР°Р№РґРµРЅ РёР»Рё РЅРµ РІ РїСЂРѕС†РµСЃСЃРµ")
                 return False
             machine_id, model = row
 
-            # 2. Проверяем наличие материалов (исправленный запрос)
+            # 2. РџСЂРѕРІРµСЂСЏРµРј РЅР°Р»РёС‡РёРµ РјР°С‚РµСЂРёР°Р»РѕРІ (РёСЃРїСЂР°РІР»РµРЅРЅС‹Р№ Р·Р°РїСЂРѕСЃ)
             cur.execute("""
                 SELECT m.name, mm.quantity, COALESCE(inv.quantity, 0) AS available
                 FROM machine_materials mm
@@ -324,14 +328,14 @@ def complete_machine_with_material_deduction(finished_good_id, inventory_number=
             """, (machine_id,))
             shortages = cur.fetchall()
             if shortages:
-                print("Недостаточно материалов:")
+                print("РќРµРґРѕСЃС‚Р°С‚РѕС‡РЅРѕ РјР°С‚РµСЂРёР°Р»РѕРІ:")
                 for name, req, avail in shortages:
-                    print(f"  - {name}: требуется {req}, в наличии {avail}")
+                    print(f"  - {name}: С‚СЂРµР±СѓРµС‚СЃСЏ {req}, РІ РЅР°Р»РёС‡РёРё {avail}")
                 return False
 
-            # 3. Списываем материалы и считаем стоимость материалов
+            # 3. РЎРїРёСЃС‹РІР°РµРј РјР°С‚РµСЂРёР°Р»С‹ Рё СЃС‡РёС‚Р°РµРј СЃС‚РѕРёРјРѕСЃС‚СЊ РјР°С‚РµСЂРёР°Р»РѕРІ
             material_cost = Decimal('0.00')
-            # Используем последнюю цену (упрощённо)
+            # РСЃРїРѕР»СЊР·СѓРµРј РїРѕСЃР»РµРґРЅСЋСЋ С†РµРЅСѓ (СѓРїСЂРѕС‰С‘РЅРЅРѕ)
             cur.execute("""
                 WITH latest_prices AS (
                     SELECT DISTINCT ON (material_id) material_id, price_per_unit
@@ -345,13 +349,13 @@ def complete_machine_with_material_deduction(finished_good_id, inventory_number=
                 WHERE mm.machine_id = %s
             """, (machine_id,))
             for mat_id, qty, price in cur.fetchall():
-                # Списываем с остатков
+                # РЎРїРёСЃС‹РІР°РµРј СЃ РѕСЃС‚Р°С‚РєРѕРІ
                 cur.execute("""
                     UPDATE material_inventory
                     SET quantity = quantity - %s
                     WHERE material_id = %s
                 """, (qty, mat_id))
-                # Запись транзакции
+                # Р—Р°РїРёСЃСЊ С‚СЂР°РЅР·Р°РєС†РёРё
                 cur.execute("""
                     INSERT INTO material_transactions (material_id, quantity_change, transaction_type, reference_id)
                     VALUES (%s, %s, 'production', %s)
@@ -359,7 +363,7 @@ def complete_machine_with_material_deduction(finished_good_id, inventory_number=
                 if price:
                     material_cost += qty * price
 
-            # 4. Учитываем трудозатраты (фактические часы)
+            # 4. РЈС‡РёС‚С‹РІР°РµРј С‚СЂСѓРґРѕР·Р°С‚СЂР°С‚С‹ (С„Р°РєС‚РёС‡РµСЃРєРёРµ С‡Р°СЃС‹)
             cur.execute("""
                 SELECT COALESCE(SUM(wl.hours * e.hourly_rate), 0)
                 FROM finished_good_labor fgl
@@ -369,27 +373,28 @@ def complete_machine_with_material_deduction(finished_good_id, inventory_number=
             """, (finished_good_id,))
             labor_cost = cur.fetchone()[0] or Decimal('0.00')
 
-            # 5. Амортизация инструментов (если привязана)
+            # 5. РђРјРѕСЂС‚РёР·Р°С†РёСЏ РёРЅСЃС‚СЂСѓРјРµРЅС‚РѕРІ (РµСЃР»Рё РїСЂРёРІСЏР·Р°РЅР°)
             from backend.models.tools import apply_tool_depreciation_for_production
             tool_cost = apply_tool_depreciation_for_production(machine_id, 1, finished_good_id)
 
             total_cost = material_cost + labor_cost + tool_cost
 
-            # 6. Обновляем finished_goods
+            # 6. РћР±РЅРѕРІР»СЏРµРј finished_goods
             cur.execute("""
                 UPDATE finished_goods
                 SET status = 'completed',
+                    produced_date = CURRENT_DATE,
                     cost_price = %s,
                     inventory_number = COALESCE(%s, inventory_number)
                 WHERE id = %s
             """, (total_cost, inventory_number, finished_good_id))
 
             conn.commit()
-            print(f"Производство станка ID {finished_good_id} завершено. Себестоимость: {total_cost:.2f}")
+            print(f"РџСЂРѕРёР·РІРѕРґСЃС‚РІРѕ СЃС‚Р°РЅРєР° ID {finished_good_id} Р·Р°РІРµСЂС€РµРЅРѕ. РЎРµР±РµСЃС‚РѕРёРјРѕСЃС‚СЊ: {total_cost:.2f}")
             return True
 
 def get_finished_goods_summary():
-    """Возвращает суммарную себестоимость готовой продукции на складе."""
+    """Р’РѕР·РІСЂР°С‰Р°РµС‚ СЃСѓРјРјР°СЂРЅСѓСЋ СЃРµР±РµСЃС‚РѕРёРјРѕСЃС‚СЊ РіРѕС‚РѕРІРѕР№ РїСЂРѕРґСѓРєС†РёРё РЅР° СЃРєР»Р°РґРµ."""
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT COALESCE(SUM(cost_price), 0) FROM finished_goods WHERE status = 'completed'")

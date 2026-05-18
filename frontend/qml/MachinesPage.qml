@@ -1,4 +1,4 @@
-import QtQuick
+﻿import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import TableModels 1.0
@@ -21,7 +21,7 @@ Page {
         anchors.bottom: parent.bottom
         currentIndex: bar.currentIndex
 
-        // ================= ВКЛАДКА 1: В ПРОЦЕССЕ =================
+        // ================= TAB 1: In Progress =================
         Item {
             id: tab1Root
             property int selectedInProgressId: -1
@@ -33,7 +33,7 @@ Page {
                 anchors.fill: parent
                 orientation: Qt.Horizontal
 
-                // ЛЕВАЯ ПАНЕЛЬ: Список станков в процессе
+                // Left side: machines in progress
                 Item {
                     SplitView.preferredWidth: 400
                     SplitView.minimumWidth: 300
@@ -46,13 +46,13 @@ Page {
                         RowLayout {
                             Layout.fillWidth: true
                             Label {
-                                text: "Станки в производстве"
+                                text: "Machines in production"
                                 font.pixelSize: 16
                                 font.bold: true
                             }
                             Item { Layout.fillWidth: true }
                             Button {
-                                text: "Обновить"
+                                text: "Refresh"
                                 onClicked: {
                                     inProgressModel.refresh()
                                     if (tab1Root.selectedInProgressId > 0) {
@@ -62,7 +62,7 @@ Page {
                             }
                         }
 
-                        // Заголовок таблицы
+                        // Table header
                         Rectangle {
                             Layout.fillWidth: true
                             height: 30
@@ -71,7 +71,7 @@ Page {
                                 anchors.fill: parent
                                 spacing: 0
                                 Repeater {
-                                    model: ["ID", "Модель", "Дата начала", "Статус"]
+                                    model: ["ID", "Model", "Start date", "Status"]
                                     Rectangle {
                                         width: index === 0 ? 50 : index === 1 ? 180 : index === 2 ? 120 : 50
                                         height: 30
@@ -131,14 +131,14 @@ Page {
                         RowLayout {
                             Layout.fillWidth: true
                             Button {
-                                text: "Завершить производство"
+                                text: "Complete production"
                                 enabled: tab1Root.selectedInProgressId > 0 && materialsCheckList.allMaterialsAvailable
                                 highlighted: tab1Root.selectedInProgressId > 0 && materialsCheckList.allMaterialsAvailable
                                 onClicked: completeDialog.open()
                             }
                             Label {
                                 visible: tab1Root.selectedInProgressId > 0 && !materialsCheckList.allMaterialsAvailable
-                                text: "⚠ Недостаточно материалов"
+                                text: "• Material check available"
                                 color: "#d9534f"
                                 font.bold: true
                             }
@@ -360,7 +360,7 @@ Page {
             Component.onCompleted: inProgressModel.refresh()
         }
 
-        // ================= ВКЛАДКА 2: ГОТОВЫЕ =================
+        // ================= TAB 2: Finished =================
         Item {
             id: tab2Root
             property int selectedFinishedId: -1
@@ -430,9 +430,9 @@ Page {
                                         anchors.fill: parent
                                         spacing: 0
                                         Repeater {
-                                            model: ["ID", "Модель", "Инв. №", "Дата", "Материалы", "Работа", "Себестоимость"]
+                                            model: ["ID", "Модель", "Инв. №", "Дата", "Материалы", "Работа", "Себестоимость", "Косвенные"]
                                             Rectangle {
-                                                width: index === 0 ? 50 : index === 1 ? 200 : index === 2 ? 100 : index === 3 ? 110 : index === 4 ? 120 : index === 5 ? 120 : 140
+                                                width: index === 0 ? 50 : index === 1 ? 200 : index === 2 ? 100 : index === 3 ? 110 : index === 4 ? 120 : index === 5 ? 120 : index === 6 ? 140 : 130
                                                 height: 35
                                                 border.width: 0
                                                 color: "transparent"
@@ -555,6 +555,17 @@ Page {
                                                     color: "#2c5aa0"
                                                 }
                                             }
+                                            Rectangle {
+                                                width: 130
+                                                height: 40
+                                                color: "transparent"
+                                                Text {
+                                                    anchors.centerIn: parent
+                                                    text: rowData.indirect_cost ? rowData.indirect_cost.toFixed(2) + " ₽" : "0.00"
+                                                    font.pixelSize: 14
+                                                    color: "#6b4f00"
+                                                }
+                                            }
                                         }
 
                                         MouseArea {
@@ -578,6 +589,20 @@ Page {
                                 enabled: tab2Root.selectedFinishedId > 0
                                 highlighted: tab2Root.selectedFinishedId > 0
                                 onClicked: sellDialog.open()
+                            }
+
+                            Button {
+                                text: "Edit"
+                                enabled: tab2Root.selectedFinishedId > 0
+                                highlighted: tab2Root.selectedFinishedId > 0
+                                onClicked: {
+                                    if (tab2Root.selectedRow >= 0) {
+                                        var item = finishedModel.get(tab2Root.selectedRow)
+                                        editFinishedDateField.text = item.produced_date || ""
+                                        editFinishedIndirectField.text = (item.indirect_cost !== undefined ? Number(item.indirect_cost).toFixed(2) : "0.00")
+                                        editFinishedDialog.open()
+                                    }
+                                }
                             }
                             
                             Button {
@@ -1083,6 +1108,35 @@ Page {
                         tab2Root.selectedRow = -1
                         tab2Root.selectedFinishedId = -1
                         finishedModel.refresh()
+                    }
+                }
+            }
+
+            Dialog {
+                id: editFinishedDialog
+                title: "Edit finished machine"
+                standardButtons: Dialog.Ok | Dialog.Cancel
+                width: 420
+                height: 230
+
+                ColumnLayout {
+                    anchors.fill: parent
+                    spacing: 10
+                    Label { text: "Production end date (YYYY-MM-DD):" }
+                    TextField { id: editFinishedDateField; Layout.fillWidth: true; placeholderText: "2026-04-28" }
+                    Label { text: "Indirect costs:" }
+                    TextField { id: editFinishedIndirectField; Layout.fillWidth: true; validator: DoubleValidator { bottom: 0 } }
+                }
+
+                onAccepted: {
+                    if (tab2Root.selectedFinishedId > 0 && editFinishedDateField.text && editFinishedIndirectField.text) {
+                        if (backend.updateFinishedGood(
+                            tab2Root.selectedFinishedId,
+                            editFinishedDateField.text,
+                            parseFloat(editFinishedIndirectField.text)
+                        )) {
+                            finishedModel.refresh()
+                        }
                     }
                 }
             }
@@ -1601,3 +1655,7 @@ Page {
         }
     }
 }
+
+
+
+

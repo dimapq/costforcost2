@@ -33,6 +33,15 @@ from frontend.controllers.table_models import (
 if __name__ == "__main__":
     app = QGuiApplication(sys.argv)
 
+    # Определяем путь к QML-файлам
+    if getattr(sys, 'frozen', False):
+        # Запущено как EXE – данные в _internal/frontend/qml
+        base_path = sys._MEIPASS
+        qml_dir = os.path.join(base_path, "frontend", "qml")
+    else:
+        # Запущено как скрипт – данные рядом с main.py
+        qml_dir = os.path.join(os.path.dirname(__file__), "qml")
+
     # Регистрация кастомных моделей ДО создания движка QML
     qmlRegisterType(MaterialTableModel, "TableModels", 1, 0, "MaterialTableModel")
     qmlRegisterType(ToolsTableModel, "TableModels", 1, 0, "ToolsTableModel")
@@ -47,7 +56,7 @@ if __name__ == "__main__":
     backend = BackendController()
     engine.rootContext().setContextProperty("backend", backend)
 
-    qml_file = os.path.join(os.path.dirname(__file__), "qml", "Main.qml")
+    qml_file = os.path.join(qml_dir, "Main.qml")
     engine.load(QUrl.fromLocalFile(qml_file))
 
     if not engine.rootObjects():
