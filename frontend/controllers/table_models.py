@@ -7,7 +7,7 @@ class MaterialTableModel(QAbstractTableModel):
     def __init__(self):
         super().__init__()
         self._data = []
-        self._extra_headers = ["Откуда взят", "Примечание"]
+        self._extra_headers = ["Откуда взят", "Примечание", "Дата обновления"]
         self._headers = ["ID", "Название", "Остаток", "Цена за ед.", "Сумма"]
 
     def rowCount(self, parent=QModelIndex()):
@@ -36,6 +36,8 @@ class MaterialTableModel(QAbstractTableModel):
                 return row.get('source') or "-"
             elif col == 6:
                 return row.get('notes') or "-"
+            elif col == 7:
+                return row.get('updated_date') or "-"
         return None
 
     def headerData(self, section, orientation, role=Qt.DisplayRole):
@@ -44,6 +46,8 @@ class MaterialTableModel(QAbstractTableModel):
                 return self._extra_headers[0]
             if section == 6:
                 return self._extra_headers[1]
+            if section == 7:
+                return self._extra_headers[2]
             return self._headers[section]
         return None
 
@@ -60,6 +64,7 @@ class MaterialTableModel(QAbstractTableModel):
             with conn.cursor() as cur:
                 cur.execute("ALTER TABLE IF EXISTS materials ADD COLUMN IF NOT EXISTS source TEXT")
                 cur.execute("ALTER TABLE IF EXISTS materials ADD COLUMN IF NOT EXISTS notes TEXT")
+                cur.execute("ALTER TABLE IF EXISTS materials ADD COLUMN IF NOT EXISTS updated_date DATE DEFAULT CURRENT_DATE")
                 cur.execute("""
                     WITH latest_prices AS (
                         SELECT DISTINCT ON (material_id) material_id, price_per_unit
@@ -69,11 +74,13 @@ class MaterialTableModel(QAbstractTableModel):
                     SELECT 
                         m.id,
                         m.name,
+                        m.unit,
                         COALESCE(inv.quantity, 0) AS qty,
                         lp.price_per_unit,
                         COALESCE(lp.price_per_unit * inv.quantity, 0) AS total,
                         m.source,
-                        m.notes
+                        m.notes,
+                        m.updated_date
                     FROM materials m
                     LEFT JOIN material_inventory inv ON m.id = inv.material_id
                     LEFT JOIN latest_prices lp ON m.id = lp.material_id
@@ -85,11 +92,13 @@ class MaterialTableModel(QAbstractTableModel):
                     {
                         'id': r[0],
                         'name': r[1],
-                        'quantity': r[2],
-                        'price': r[3],
-                        'total': r[4],
-                        'source': r[5],
-                        'notes': r[6]
+                        'unit': r[2],
+                        'quantity': r[3],
+                        'price': r[4],
+                        'total': r[5],
+                        'source': r[6],
+                        'notes': r[7],
+                        'updated_date': str(r[8]) if r[8] else ''
                     }
                     for r in rows
                 ]
@@ -455,7 +464,10 @@ class FinishedGoodsModel(QAbstractTableModel):
             if col == 3: return row['produced_date']
             if col == 4: return row['buyer'] or "—"
             if col == 5: return row['sale_date'] or "—"
-            if col == 6: return f"{row['cost']:.2f}" if row['cost'] else "0.00"
+            if col == 6:
+                cost = row.get('cost', 0.0) or 0.0
+                base_cost = row.get('base_cost', cost) or 0.0
+                return f"{cost:.2f} ({base_cost:.2f})"
             if col == 7: return f"{row['indirect_cost']:.2f}" if row['indirect_cost'] else "0.00"
             if col == 8: return row['status']
         return None
@@ -492,6 +504,7 @@ class FinishedGoodsModel(QAbstractTableModel):
         self.beginResetModel()
         with get_connection() as conn:
             with conn.cursor() as cur:
+                cur.execute("ALTER TABLE IF EXISTS finished_goods ADD COLUMN IF NOT EXISTS start_date DATE")
                 cur.execute("""
                     WITH machine_costs AS (
                         SELECT 
@@ -524,11 +537,13 @@ class FinishedGoodsModel(QAbstractTableModel):
                         fg.machine_model, 
                         fg.cost_price, 
                         fg.produced_date, 
+                        fg.start_date,
                         fg.status,
                         fg.inventory_number, 
                         fg.buyer, 
                         fg.sale_date,
                         fg.indirect_cost,
+                        fg.notes,
                         mc.materials_cost,
                         mc.labor_cost
                     FROM finished_goods fg
@@ -543,13 +558,16 @@ class FinishedGoodsModel(QAbstractTableModel):
                         'model': r[1],
                         'cost': float(r[2]) if r[2] else 0.0,
                         'produced_date': str(r[3]),
-                        'status': r[4],
-                        'inv_num': r[5],
-                        'buyer': r[6],
-                        'sale_date': str(r[7]) if r[7] else None,
-                        'indirect_cost': float(r[8]) if r[8] else 0.0,
-                        'materials_cost': float(r[9]) if r[9] else 0.0,
-                        'labor_cost': float(r[10]) if r[10] else 0.0
+                        'start_date': str(r[4]) if r[4] else None,
+                        'status': r[5],
+                        'inv_num': r[6],
+                        'buyer': r[7],
+                        'sale_date': str(r[8]) if r[8] else None,
+                        'indirect_cost': float(r[9]) if r[9] else 0.0,
+                        'base_cost': float(r[2]) - float(r[9]) if r[2] is not None else 0.0,
+                        'notes': r[10] or '',
+                        'materials_cost': float(r[11]) if r[11] else 0.0,
+                        'labor_cost': float(r[12]) if r[12] else 0.0
                     }
                     for r in rows
                 ]

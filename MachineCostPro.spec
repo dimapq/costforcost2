@@ -5,7 +5,7 @@ a = Analysis(
     ['frontend\\main.py'],
     pathex=[],
     binaries=[],
-    datas=[('frontend/qml', 'frontend/qml'), ('backend', 'backend')],
+    datas=[('frontend/qml', 'frontend/qml'), ('backend', 'backend'), ('config.ini', '.')],
     hiddenimports=['psycopg2', 'pandas', 'openpyxl', 'requests', 'bs4', 'lxml', 'configparser', 'backend.db.config'],
     hookspath=[],
     hooksconfig={},

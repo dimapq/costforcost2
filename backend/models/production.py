@@ -4,6 +4,54 @@ from backend.db.connection import get_connection
 from backend.models.machine import calculate_machine_cost_from_purchases
 from backend.models.tools import apply_tool_depreciation_for_production
 
+def _consume_material_fifo(cur, material_id, required_qty):
+    required_qty = Decimal(str(required_qty or 0))
+    if required_qty <= 0:
+        return Decimal('0.00')
+
+    total_cost = Decimal('0.00')
+    remaining = required_qty
+
+    cur.execute("""
+        SELECT id, COALESCE(remaining_quantity, 0), price_per_unit
+        FROM purchases
+        WHERE material_id = %s
+          AND price_per_unit IS NOT NULL
+          AND COALESCE(remaining_quantity, 0) > 0
+        ORDER BY purchase_date ASC NULLS LAST, id ASC
+    """, (material_id,))
+    lots = cur.fetchall()
+
+    for purchase_id, lot_qty, lot_price in lots:
+        if remaining <= 0:
+            break
+        lot_qty = Decimal(str(lot_qty or 0))
+        lot_price = Decimal(str(lot_price or 0))
+        if lot_qty <= 0:
+            continue
+        take = lot_qty if lot_qty < remaining else remaining
+        total_cost += take * lot_price
+        cur.execute("""
+            UPDATE purchases
+            SET remaining_quantity = remaining_quantity - %s
+            WHERE id = %s
+        """, (take, purchase_id))
+        remaining -= take
+
+    if remaining > 0:
+        cur.execute("""
+            SELECT price_per_unit
+            FROM purchases
+            WHERE material_id = %s AND price_per_unit IS NOT NULL
+            ORDER BY purchase_date DESC NULLS LAST, id DESC
+            LIMIT 1
+        """, (material_id,))
+        row = cur.fetchone()
+        if row and row[0] is not None:
+            total_cost += remaining * Decimal(str(row[0]))
+
+    return total_cost
+
 
 def check_material_availability(machine_id, quantity=1):
     with get_connection() as conn:
@@ -69,6 +117,7 @@ def _produce_machine_impl(machine_id, quantity=1, notes=None, ask_labor=False):
                     INSERT INTO material_transactions (material_id, quantity_change, transaction_type)
                     VALUES (%s, %s, 'production')
                 """, (mat_id, -req_qty))
+                _consume_material_fifo(cur, mat_id, req_qty)
 
             new_fg_ids = []
             for _ in range(quantity):
@@ -337,18 +386,11 @@ def complete_machine_with_material_deduction(finished_good_id, inventory_number=
             material_cost = Decimal('0.00')
             # РСЃРїРѕР»СЊР·СѓРµРј РїРѕСЃР»РµРґРЅСЋСЋ С†РµРЅСѓ (СѓРїСЂРѕС‰С‘РЅРЅРѕ)
             cur.execute("""
-                WITH latest_prices AS (
-                    SELECT DISTINCT ON (material_id) material_id, price_per_unit
-                    FROM purchases
-                    WHERE price_per_unit IS NOT NULL
-                    ORDER BY material_id, purchase_date DESC
-                )
-                SELECT mm.material_id, mm.quantity, lp.price_per_unit
+                SELECT mm.material_id, mm.quantity
                 FROM machine_materials mm
-                LEFT JOIN latest_prices lp ON mm.material_id = lp.material_id
                 WHERE mm.machine_id = %s
             """, (machine_id,))
-            for mat_id, qty, price in cur.fetchall():
+            for mat_id, qty in cur.fetchall():
                 # РЎРїРёСЃС‹РІР°РµРј СЃ РѕСЃС‚Р°С‚РєРѕРІ
                 cur.execute("""
                     UPDATE material_inventory
@@ -360,8 +402,7 @@ def complete_machine_with_material_deduction(finished_good_id, inventory_number=
                     INSERT INTO material_transactions (material_id, quantity_change, transaction_type, reference_id)
                     VALUES (%s, %s, 'production', %s)
                 """, (mat_id, -qty, finished_good_id))
-                if price:
-                    material_cost += qty * price
+                material_cost += _consume_material_fifo(cur, mat_id, qty)
 
             # 4. РЈС‡РёС‚С‹РІР°РµРј С‚СЂСѓРґРѕР·Р°С‚СЂР°С‚С‹ (С„Р°РєС‚РёС‡РµСЃРєРёРµ С‡Р°СЃС‹)
             cur.execute("""

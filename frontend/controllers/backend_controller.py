@@ -1,4 +1,4 @@
-﻿# frontend/controllers/backend_controller.py
+# frontend/controllers/backend_controller.py
 from PySide6.QtCore import QObject, Slot
 from decimal import Decimal
 
@@ -12,13 +12,86 @@ from backend.db.connection import get_connection
 
 
 class BackendController(QObject):
+    @Slot(result="QVariantMap")
+    def getDatabaseConfig(self):
+        try:
+            from backend.db.config import get_config, get_config_path, is_connection_confirmed
+            config = get_config(create_if_missing=True)
+            db = config['database']
+            return {
+                "host": db.get('host', 'localhost'),
+                "port": db.get('port', '5432'),
+                "name": db.get('name', 'cost'),
+                "user": db.get('user', 'postgres'),
+                "password": db.get('password', ''),
+                "config_path": str(get_config_path()),
+                "connection_confirmed": is_connection_confirmed()
+            }
+        except Exception as e:
+            print(f"Ошибка чтения config.ini: {e}")
+            return {
+                "host": "localhost",
+                "port": "5432",
+                "name": "cost",
+                "user": "postgres",
+                "password": "",
+                "config_path": "config.ini",
+                "connection_confirmed": False
+            }
+
+    @Slot(result=bool)
+    def shouldShowConnectionDialog(self):
+        try:
+            from backend.db.config import is_connection_confirmed
+            return not is_connection_confirmed()
+        except Exception:
+            return True
+
+    @Slot(str, str, str, str, str, result="QVariantMap")
+    def testDatabaseConfig(self, host, port, name, user, password):
+        try:
+            import psycopg2
+            conn = psycopg2.connect(
+                host=(host or 'localhost').strip(),
+                port=int(port or 5432),
+                dbname=(name or 'cost').strip(),
+                user=(user or 'postgres').strip(),
+                password=password or '',
+                connect_timeout=3,
+                options='-c client_encoding=utf8'
+            )
+            with conn:
+                with conn.cursor() as cur:
+                    cur.execute('SELECT 1')
+                    cur.fetchone()
+            conn.close()
+            return {"ok": True, "message": "Подключение успешно"}
+        except Exception as e:
+            return {"ok": False, "message": f"Ошибка подключения: {e}"}
+
+    @Slot(str, str, str, str, str, result="QVariantMap")
+    def saveDatabaseConfig(self, host, port, name, user, password):
+        try:
+            test = self.testDatabaseConfig(host, port, name, user, password)
+            if not test.get("ok"):
+                return test
+            from backend.db.config import save_db_config
+            path = save_db_config(host, port, name, user, password, confirmed=True)
+            return {"ok": True, "message": f"Подключение сохранено: {path}"}
+        except Exception as e:
+            return {"ok": False, "message": f"Ошибка сохранения config.ini: {e}"}
+
     def _ensure_indirect_schema(self):
         with get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("ALTER TABLE IF EXISTS materials ADD COLUMN IF NOT EXISTS source TEXT")
                 cur.execute("ALTER TABLE IF EXISTS materials ADD COLUMN IF NOT EXISTS notes TEXT")
+                cur.execute("ALTER TABLE IF EXISTS materials ADD COLUMN IF NOT EXISTS updated_date DATE DEFAULT CURRENT_DATE")
                 cur.execute("ALTER TABLE IF EXISTS finished_goods ADD COLUMN IF NOT EXISTS start_date DATE")
                 cur.execute("ALTER TABLE IF EXISTS finished_goods ADD COLUMN IF NOT EXISTS indirect_cost DECIMAL(12, 2) DEFAULT 0")
+                cur.execute("ALTER TABLE IF EXISTS finished_goods ADD COLUMN IF NOT EXISTS notes TEXT")
+                cur.execute("ALTER TABLE IF EXISTS purchases ADD COLUMN IF NOT EXISTS is_cash BOOLEAN DEFAULT FALSE")
+                cur.execute("ALTER TABLE IF EXISTS balance ADD COLUMN IF NOT EXISTS is_cash BOOLEAN DEFAULT FALSE")
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS indirect_expense_categories (
                         id SERIAL PRIMARY KEY,
@@ -43,6 +116,56 @@ class BackendController(QObject):
                     SET start_date = COALESCE(start_date, produced_date, CURRENT_DATE)
                 """)
             conn.commit()
+
+    def _ensure_bonus_schema(self):
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("ALTER TABLE IF EXISTS balance ADD COLUMN IF NOT EXISTS is_cash BOOLEAN DEFAULT FALSE")
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS employee_bonus_payments (
+                        id SERIAL PRIMARY KEY,
+                        period_start DATE NOT NULL,
+                        period_end DATE NOT NULL,
+                        bonus_percent DECIMAL(8, 2) NOT NULL,
+                        base_amount DECIMAL(12, 2) NOT NULL DEFAULT 0,
+                        bonus_amount DECIMAL(12, 2) NOT NULL DEFAULT 0,
+                        paid_until DATE NOT NULL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+            conn.commit()
+
+    def _ensure_employee_settlement_schema(self):
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS employee_settlements (
+                        id SERIAL PRIMARY KEY,
+                        employee_id INT REFERENCES employees(id) ON DELETE CASCADE,
+                        settlement_type VARCHAR(20) NOT NULL,
+                        settlement_date DATE NOT NULL DEFAULT CURRENT_DATE,
+                        title VARCHAR(255) NOT NULL,
+                        amount DECIMAL(12, 2) NOT NULL DEFAULT 0,
+                        notes TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+            conn.commit()
+
+    def _parse_period(self, start_date_str, end_date_str):
+        from datetime import datetime, date
+        if start_date_str:
+            start_date = datetime.strptime(start_date_str, "%Y-%m-%d").date()
+        else:
+            today = date.today()
+            start_date = today.replace(day=1)
+        if end_date_str:
+            end_date = datetime.strptime(end_date_str, "%Y-%m-%d").date()
+        else:
+            end_date = date.today()
+        if end_date < start_date:
+            start_date, end_date = end_date, start_date
+        return start_date, end_date
 
     def _recalculate_months_for_machine(self, finished_good_id):
         with get_connection() as conn:
@@ -166,6 +289,230 @@ class BackendController(QObject):
             print(f"РћС€РёР±РєР° СЂР°СЃС‡С‘С‚Р° Р·Р°СЂРїР»Р°С‚С‹: {e}")
             return "РћС€РёР±РєР° СЂР°СЃС‡С‘С‚Р°"
 
+    def _calculate_bonus_data(self, start_date_str, end_date_str, bonus_percent):
+        start_date, end_date = self._parse_period(start_date_str, end_date_str)
+        percent = Decimal(str(bonus_percent or 0)).quantize(Decimal("0.01"))
+        if percent < 0:
+            percent = Decimal("0.00")
+
+        self._ensure_bonus_schema()
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT e.name, COALESCE(SUM(wl.hours), 0) AS total_hours, COALESCE(e.hourly_rate, 0)
+                    FROM employees e
+                    JOIN work_logs wl ON e.id = wl.employee_id
+                    WHERE wl.date BETWEEN %s AND %s
+                    GROUP BY e.id, e.name, e.hourly_rate
+                    ORDER BY e.name
+                """, (start_date, end_date))
+                rows = cur.fetchall()
+
+        lines = [
+            f"Период премии: {start_date} — {end_date}",
+            f"Процент премии: {percent:.2f}%",
+            ""
+        ]
+        base_total = Decimal("0.00")
+        bonus_total = Decimal("0.00")
+        for name, hours, rate in rows:
+            hours = hours or Decimal("0.00")
+            rate = rate or Decimal("0.00")
+            base_amount = hours * rate
+            bonus_amount = (base_amount * percent / Decimal("100")).quantize(Decimal("0.01"))
+            base_total += base_amount
+            bonus_total += bonus_amount
+            lines.append(
+                f"{name}: {hours:.2f} ч × {rate:.2f} = {base_amount:.2f} руб.; "
+                f"премия {bonus_amount:.2f} руб."
+            )
+
+        if not rows:
+            lines.append("За выбранный период нет записей о работе.")
+
+        lines.extend([
+            "",
+            f"База для премии: {base_total:.2f} руб.",
+            f"ИТОГО премия: {bonus_total:.2f} руб."
+        ])
+        return {
+            "ok": True,
+            "start_date": start_date,
+            "end_date": end_date,
+            "percent": percent,
+            "base_total": base_total.quantize(Decimal("0.01")),
+            "bonus_total": bonus_total.quantize(Decimal("0.01")),
+            "text": "\n".join(lines)
+        }
+
+    @Slot(result=str)
+    def getLastBonusPaidUntil(self):
+        try:
+            self._ensure_bonus_schema()
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT MAX(paid_until) FROM employee_bonus_payments")
+                    row = cur.fetchone()
+            return row[0].isoformat() if row and row[0] else ""
+        except Exception as e:
+            print(f"Ошибка чтения последней премии: {e}")
+            return ""
+
+    @Slot(str, str, float, result="QVariantMap")
+    def calculateBonus(self, start_date_str, end_date_str, bonus_percent):
+        try:
+            data = self._calculate_bonus_data(start_date_str, end_date_str, bonus_percent)
+            return {
+                "ok": True,
+                "text": data["text"],
+                "base_amount": float(data["base_total"]),
+                "bonus_amount": float(data["bonus_total"]),
+                "paid_until": data["end_date"].isoformat()
+            }
+        except Exception as e:
+            print(f"Ошибка расчёта премии: {e}")
+            return {"ok": False, "message": f"Ошибка расчёта премии: {e}", "text": ""}
+
+    @Slot(str, str, float, result="QVariantMap")
+    def saveBonusPayment(self, start_date_str, end_date_str, bonus_percent):
+        try:
+            data = self._calculate_bonus_data(start_date_str, end_date_str, bonus_percent)
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        INSERT INTO employee_bonus_payments
+                            (period_start, period_end, bonus_percent, base_amount, bonus_amount, paid_until)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                    """, (
+                        data["start_date"],
+                        data["end_date"],
+                        data["percent"],
+                        data["base_total"],
+                        data["bonus_total"],
+                        data["end_date"]
+                    ))
+                    if data["bonus_total"] > 0:
+                        cur.execute("""
+                            INSERT INTO balance (date, expense, notes, is_cash)
+                            VALUES (%s, %s, %s, FALSE)
+                        """, (
+                            data["end_date"],
+                            data["bonus_total"],
+                            f"Премия сотрудникам за период {data['start_date']} — {data['end_date']} ({data['percent']:.2f}%)"
+                        ))
+                conn.commit()
+            return {
+                "ok": True,
+                "message": f"Премия сохранена. Выписана по {data['end_date']}.",
+                "text": data["text"],
+                "base_amount": float(data["base_total"]),
+                "bonus_amount": float(data["bonus_total"]),
+                "paid_until": data["end_date"].isoformat()
+            }
+        except Exception as e:
+            print(f"Ошибка сохранения премии: {e}")
+            return {"ok": False, "message": f"Ошибка сохранения премии: {e}", "text": ""}
+
+    @Slot(int, str, str, result="QVariantMap")
+    def getEmployeeSettlementSummary(self, employee_id, start_date_str, end_date_str):
+        try:
+            start_date, end_date = self._parse_period(start_date_str, end_date_str)
+            self._ensure_employee_settlement_schema()
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT COALESCE(SUM(wl.hours * COALESCE(e.hourly_rate, 0)), 0)
+                        FROM work_logs wl
+                        JOIN employees e ON e.id = wl.employee_id
+                        WHERE wl.employee_id = %s AND wl.date BETWEEN %s AND %s
+                    """, (employee_id, start_date, end_date))
+                    salary_accrued = cur.fetchone()[0] or Decimal("0.00")
+                    cur.execute("""
+                        SELECT
+                            COALESCE(SUM(CASE WHEN settlement_type = 'salary' THEN amount ELSE 0 END), 0),
+                            COALESCE(SUM(CASE WHEN settlement_type = 'service' THEN amount ELSE 0 END), 0)
+                        FROM employee_settlements
+                        WHERE employee_id = %s AND settlement_date BETWEEN %s AND %s
+                    """, (employee_id, start_date, end_date))
+                    salary_paid, service_total = cur.fetchone()
+                    salary_paid = salary_paid or Decimal("0.00")
+                    service_total = service_total or Decimal("0.00")
+                    cur.execute("""
+                        SELECT id, settlement_type, settlement_date, title, amount, COALESCE(notes, '')
+                        FROM employee_settlements
+                        WHERE employee_id = %s AND settlement_date BETWEEN %s AND %s
+                        ORDER BY settlement_date DESC, id DESC
+                    """, (employee_id, start_date, end_date))
+                    rows = cur.fetchall()
+
+            salary_balance = salary_paid - salary_accrued
+            total_employee_debt = (salary_accrued - salary_paid) + service_total
+            entries = []
+            for row_id, settlement_type, settlement_date, title, amount, notes in rows:
+                entries.append({
+                    "id": row_id,
+                    "type": settlement_type,
+                    "type_label": "Зарплата" if settlement_type == "salary" else "Услуга",
+                    "date": settlement_date.isoformat() if settlement_date else "",
+                    "title": title,
+                    "amount": float(amount or 0),
+                    "notes": notes
+                })
+            return {
+                "ok": True,
+                "salary_accrued": float(salary_accrued),
+                "salary_paid": float(salary_paid),
+                "salary_balance": float(salary_balance),
+                "service_balance": float(service_total),
+                "total_balance": float(total_employee_debt),
+                "entries": entries
+            }
+        except Exception as e:
+            print(f"Ошибка расчёта взаиморасчётов сотрудника: {e}")
+            return {"ok": False, "message": f"Ошибка расчёта взаиморасчётов: {e}", "entries": []}
+
+    @Slot(int, str, str, str, float, result="QVariantMap")
+    def addEmployeeSettlement(self, employee_id, settlement_type, settlement_date_str, title, amount):
+        try:
+            from datetime import datetime, date
+            self._ensure_employee_settlement_schema()
+            clean_type = settlement_type if settlement_type in ("salary", "service") else "service"
+            settlement_date = datetime.strptime(settlement_date_str, "%Y-%m-%d").date() if settlement_date_str else date.today()
+            clean_title = (title or "").strip()
+            if not clean_title:
+                return {"ok": False, "message": "Укажите название записи."}
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        INSERT INTO employee_settlements
+                            (employee_id, settlement_type, settlement_date, title, amount)
+                        VALUES (%s, %s, %s, %s, %s)
+                    """, (
+                        employee_id,
+                        clean_type,
+                        settlement_date,
+                        clean_title,
+                        Decimal(str(amount or 0))
+                    ))
+                conn.commit()
+            return {"ok": True, "message": "Запись добавлена."}
+        except Exception as e:
+            print(f"Ошибка добавления взаиморасчёта сотрудника: {e}")
+            return {"ok": False, "message": f"Ошибка добавления записи: {e}"}
+
+    @Slot(int, result="QVariantMap")
+    def deleteEmployeeSettlement(self, settlement_id):
+        try:
+            self._ensure_employee_settlement_schema()
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("DELETE FROM employee_settlements WHERE id = %s", (settlement_id,))
+                conn.commit()
+            return {"ok": True, "message": "Запись удалена."}
+        except Exception as e:
+            print(f"Ошибка удаления взаиморасчёта сотрудника: {e}")
+            return {"ok": False, "message": f"Ошибка удаления записи: {e}"}
+
     # ---------- Р“РѕС‚РѕРІС‹Рµ СЃС‚Р°РЅРєРё ----------
     @Slot(result="QVariantList")
     def getFinishedGoodsList(self):
@@ -250,37 +597,60 @@ class BackendController(QObject):
             return []
 
     # ---------- РњР°С‚РµСЂРёР°Р»С‹ ----------
-    @Slot(str, str, float, float, str, str, result=bool)
-    def addMaterial(self, name, unit, price, quantity, source, notes):
+    @Slot(str, str, float, float, str, str, str, bool, result=bool)
+    def addMaterial(self, name, unit, price, quantity, source, notes, updated_date_str, is_cash):
         try:
+            price_decimal = Decimal(str(price))
+            quantity_decimal = Decimal(str(quantity))
+            total_amount = price_decimal * quantity_decimal
+            from datetime import datetime, date
+            updated_date = datetime.strptime(updated_date_str, "%Y-%m-%d").date() if updated_date_str else date.today()
             with get_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute("ALTER TABLE IF EXISTS materials ADD COLUMN IF NOT EXISTS source TEXT")
                     cur.execute("ALTER TABLE IF EXISTS materials ADD COLUMN IF NOT EXISTS notes TEXT")
+                    cur.execute("ALTER TABLE IF EXISTS materials ADD COLUMN IF NOT EXISTS updated_date DATE DEFAULT CURRENT_DATE")
+                    cur.execute("ALTER TABLE IF EXISTS purchases ADD COLUMN IF NOT EXISTS is_cash BOOLEAN DEFAULT FALSE")
+                    cur.execute("ALTER TABLE IF EXISTS balance ADD COLUMN IF NOT EXISTS is_cash BOOLEAN DEFAULT FALSE")
                     cur.execute("""
-                        INSERT INTO materials (name, unit, source, notes)
-                        VALUES (%s, %s, NULLIF(%s, ''), NULLIF(%s, ''))
+                        INSERT INTO materials (name, unit, source, notes, updated_date)
+                        VALUES (%s, %s, NULLIF(%s, ''), NULLIF(%s, ''), %s)
                         ON CONFLICT (name) DO UPDATE SET
                             unit = EXCLUDED.unit,
                             source = COALESCE(EXCLUDED.source, materials.source),
-                            notes = COALESCE(EXCLUDED.notes, materials.notes)
+                            notes = COALESCE(EXCLUDED.notes, materials.notes),
+                            updated_date = EXCLUDED.updated_date
                         RETURNING id
-                    """, (name, unit, source, notes))
+                    """, (name, unit, source, notes, updated_date))
                     mat_id = cur.fetchone()[0]
                     cur.execute("""
-                        INSERT INTO purchases (material_id, price_per_unit, quantity, remaining_quantity, purchase_date)
-                        VALUES (%s, %s, %s, %s, CURRENT_DATE)
-                    """, (mat_id, Decimal(str(price)), Decimal(str(quantity)), Decimal(str(quantity))))
+                        INSERT INTO purchases (material_id, price_per_unit, quantity, remaining_quantity, purchase_date, notes, is_cash)
+                        VALUES (%s, %s, %s, %s, CURRENT_DATE, %s, %s)
+                    """, (
+                        mat_id,
+                        price_decimal,
+                        quantity_decimal,
+                        quantity_decimal,
+                        notes if notes else None,
+                        bool(is_cash)
+                    ))
                     cur.execute("""
                         INSERT INTO material_inventory (material_id, quantity) VALUES (%s, %s)
                         ON CONFLICT (material_id) DO UPDATE SET quantity = material_inventory.quantity + EXCLUDED.quantity
-                    """, (mat_id, Decimal(str(quantity))))
+                    """, (mat_id, quantity_decimal))
+                    cur.execute("""
+                        INSERT INTO balance (date, expense, notes, is_cash)
+                        VALUES (CURRENT_DATE, %s, %s, %s)
+                    """, (
+                        total_amount,
+                        f"Покупка материала: {name} ({quantity_decimal} {unit or ''} x {price_decimal})",
+                        bool(is_cash)
+                    ))
                     conn.commit()
             return True
         except Exception as e:
-            print(f"РћС€РёР±РєР° РґРѕР±Р°РІР»РµРЅРёСЏ РјР°С‚РµСЂРёР°Р»Р°: {e}")
+            print(f"Ошибка добавления материала: {e}")
             return False
-
     @Slot(str, result=bool)
     def parseAndAddMaterial(self, url):
         try:
@@ -343,7 +713,429 @@ class BackendController(QObject):
             print(f"РћС€РёР±РєР° РѕР±РЅРѕРІР»РµРЅРёСЏ С†РµРЅС‹ РјР°С‚РµСЂРёР°Р»Р°: {e}")
             return False
 
+    @Slot(int, str, float, float, str, str, result="QVariantMap")
+    def convertAreaMaterialToPart(self, source_material_id, part_name, area_qty, part_qty, part_unit, notes):
+        try:
+            if source_material_id <= 0:
+                return {"ok": False, "message": "Выберите исходный материал."}
+            clean_name = (part_name or "").strip()
+            if not clean_name:
+                return {"ok": False, "message": "Укажите название готовой детали."}
+            area = Decimal(str(area_qty or 0))
+            quantity = Decimal(str(part_qty or 1))
+            if area <= 0:
+                return {"ok": False, "message": "Площадь списания должна быть больше нуля."}
+            if quantity <= 0:
+                return {"ok": False, "message": "Количество деталей должно быть больше нуля."}
+
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("ALTER TABLE IF EXISTS materials ADD COLUMN IF NOT EXISTS source TEXT")
+                    cur.execute("ALTER TABLE IF EXISTS materials ADD COLUMN IF NOT EXISTS notes TEXT")
+                    cur.execute("ALTER TABLE IF EXISTS materials ADD COLUMN IF NOT EXISTS updated_date DATE DEFAULT CURRENT_DATE")
+                    cur.execute("""
+                        CREATE TABLE IF NOT EXISTS material_conversions (
+                            id SERIAL PRIMARY KEY,
+                            source_material_id INT REFERENCES materials(id),
+                            target_material_id INT REFERENCES materials(id),
+                            source_quantity DECIMAL(12, 4) NOT NULL,
+                            target_quantity DECIMAL(12, 4) NOT NULL,
+                            total_cost DECIMAL(12, 2) NOT NULL DEFAULT 0,
+                            notes TEXT,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        )
+                    """)
+                    cur.execute("""
+                        SELECT m.name, m.unit, COALESCE(inv.quantity, 0)
+                        FROM materials m
+                        LEFT JOIN material_inventory inv ON inv.material_id = m.id
+                        WHERE m.id = %s
+                    """, (source_material_id,))
+                    source_row = cur.fetchone()
+                    if not source_row:
+                        return {"ok": False, "message": "Исходный материал не найден."}
+                    source_name, source_unit, current_qty = source_row
+                    current_qty = Decimal(str(current_qty or 0))
+                    if area > current_qty:
+                        return {
+                            "ok": False,
+                            "message": f"Недостаточно материала. На складе {current_qty:.4f}, нужно {area:.4f}."
+                        }
+                    if clean_name.lower() == (source_name or "").strip().lower():
+                        return {"ok": False, "message": "Название детали должно отличаться от исходного материала."}
+
+                    remaining_to_price = area
+                    total_cost = Decimal("0.00")
+                    cur.execute("""
+                        SELECT id, COALESCE(remaining_quantity, 0), COALESCE(price_per_unit, 0)
+                        FROM purchases
+                        WHERE material_id = %s AND COALESCE(remaining_quantity, 0) > 0
+                        ORDER BY purchase_date ASC, id ASC
+                    """, (source_material_id,))
+                    for purchase_id, remaining_qty, price in cur.fetchall():
+                        if remaining_to_price <= 0:
+                            break
+                        take_qty = min(Decimal(str(remaining_qty or 0)), remaining_to_price)
+                        if take_qty <= 0:
+                            continue
+                        total_cost += take_qty * Decimal(str(price or 0))
+                        remaining_to_price -= take_qty
+                        cur.execute("""
+                            UPDATE purchases
+                            SET remaining_quantity = GREATEST(COALESCE(remaining_quantity, 0) - %s, 0)
+                            WHERE id = %s
+                        """, (take_qty, purchase_id))
+
+                    if remaining_to_price > 0:
+                        cur.execute("""
+                            SELECT COALESCE(price_per_unit, 0)
+                            FROM purchases
+                            WHERE material_id = %s AND price_per_unit IS NOT NULL
+                            ORDER BY purchase_date DESC, id DESC
+                            LIMIT 1
+                        """, (source_material_id,))
+                        price_row = cur.fetchone()
+                        fallback_price = Decimal(str(price_row[0] if price_row else 0))
+                        total_cost += remaining_to_price * fallback_price
+
+                    unit_price = (total_cost / quantity).quantize(Decimal("0.01")) if quantity else Decimal("0.00")
+                    target_notes = notes.strip() if notes else f"Деталь из материала: {source_name}"
+                    cur.execute("""
+                        INSERT INTO materials (name, unit, source, notes, updated_date)
+                        VALUES (%s, %s, %s, %s, CURRENT_DATE)
+                        ON CONFLICT (name) DO UPDATE SET
+                            unit = EXCLUDED.unit,
+                            source = EXCLUDED.source,
+                            notes = COALESCE(EXCLUDED.notes, materials.notes),
+                            updated_date = CURRENT_DATE
+                        RETURNING id
+                    """, (
+                        clean_name,
+                        (part_unit or "шт").strip(),
+                        source_name,
+                        target_notes
+                    ))
+                    target_material_id = cur.fetchone()[0]
+
+                    cur.execute("""
+                        UPDATE material_inventory
+                        SET quantity = quantity - %s
+                        WHERE material_id = %s
+                    """, (area, source_material_id))
+                    cur.execute("""
+                        INSERT INTO material_inventory (material_id, quantity)
+                        VALUES (%s, %s)
+                        ON CONFLICT (material_id) DO UPDATE
+                        SET quantity = material_inventory.quantity + EXCLUDED.quantity
+                    """, (target_material_id, quantity))
+                    cur.execute("""
+                        INSERT INTO purchases (material_id, price_per_unit, quantity, remaining_quantity, purchase_date, notes)
+                        VALUES (%s, %s, %s, %s, CURRENT_DATE, %s)
+                    """, (
+                        target_material_id,
+                        unit_price,
+                        quantity,
+                        quantity,
+                        f"Изготовлено из {source_name}: списано {area} {source_unit or ''}"
+                    ))
+                    cur.execute("""
+                        INSERT INTO material_transactions (material_id, quantity_change, transaction_type, reference_id)
+                        VALUES (%s, %s, 'conversion_out', %s)
+                    """, (source_material_id, -area, target_material_id))
+                    cur.execute("""
+                        INSERT INTO material_transactions (material_id, quantity_change, transaction_type, reference_id)
+                        VALUES (%s, %s, 'conversion_in', %s)
+                    """, (target_material_id, quantity, source_material_id))
+                    cur.execute("""
+                        INSERT INTO material_conversions
+                            (source_material_id, target_material_id, source_quantity, target_quantity, total_cost, notes)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                    """, (
+                        source_material_id,
+                        target_material_id,
+                        area,
+                        quantity,
+                        total_cost.quantize(Decimal("0.01")),
+                        target_notes
+                    ))
+                    conn.commit()
+            return {
+                "ok": True,
+                "message": f"Готовая деталь создана. Списано {area:.4f} {source_unit or ''}, добавлено {quantity:.4f} {(part_unit or 'шт').strip()}. Цена детали: {unit_price:.2f} руб."
+            }
+        except Exception as e:
+            print(f"Ошибка перевода материала в готовую деталь: {e}")
+            return {"ok": False, "message": f"Ошибка перевода материала: {e}"}
+
+    @Slot(result="QVariantList")
+    def getAreaMaterialLots(self):
+        try:
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("ALTER TABLE IF EXISTS materials ADD COLUMN IF NOT EXISTS source TEXT")
+                    cur.execute("ALTER TABLE IF EXISTS materials ADD COLUMN IF NOT EXISTS notes TEXT")
+                    cur.execute("""
+                        SELECT
+                            p.id,
+                            m.id,
+                            m.name,
+                            COALESCE(m.unit, ''),
+                            COALESCE(p.remaining_quantity, 0),
+                            COALESCE(p.quantity, 0),
+                            COALESCE(p.price_per_unit, 0),
+                            p.purchase_date,
+                            COALESCE(p.notes, ''),
+                            COALESCE(m.source, '')
+                        FROM purchases p
+                        JOIN materials m ON m.id = p.material_id
+                        WHERE COALESCE(p.remaining_quantity, 0) > 0
+                          AND (
+                              LOWER(COALESCE(m.unit, '')) IN ('м2', 'м²', 'кв.м', 'кв м', 'm2')
+                              OR LOWER(m.name) LIKE '%плит%'
+                              OR LOWER(m.name) LIKE '%лист%'
+                          )
+                        ORDER BY p.purchase_date DESC, p.id DESC
+                    """)
+                    rows = cur.fetchall()
+            return [
+                {
+                    "purchase_id": r[0],
+                    "material_id": r[1],
+                    "material_name": r[2],
+                    "unit": r[3],
+                    "remaining_quantity": float(r[4] or 0),
+                    "original_quantity": float(r[5] or 0),
+                    "price_per_unit": float(r[6] or 0),
+                    "purchase_date": r[7].isoformat() if r[7] else "",
+                    "notes": r[8] or "",
+                    "source": r[9] or ""
+                }
+                for r in rows
+            ]
+        except Exception as e:
+            print(f"Ошибка получения плит/листов: {e}")
+            return []
+
+    @Slot(int, str, float, float, str, str, result="QVariantMap")
+    def convertMaterialLotToPart(self, purchase_id, part_name, area_qty, part_qty, part_unit, notes):
+        try:
+            clean_name = (part_name or "").strip()
+            if purchase_id <= 0:
+                return {"ok": False, "message": "Выберите плиту/партию."}
+            if not clean_name:
+                return {"ok": False, "message": "Укажите название готовой детали."}
+            area = Decimal(str(area_qty or 0))
+            quantity = Decimal(str(part_qty or 1))
+            if area <= 0:
+                return {"ok": False, "message": "Площадь списания должна быть больше нуля."}
+            if quantity <= 0:
+                return {"ok": False, "message": "Количество деталей должно быть больше нуля."}
+
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("ALTER TABLE IF EXISTS materials ADD COLUMN IF NOT EXISTS source TEXT")
+                    cur.execute("ALTER TABLE IF EXISTS materials ADD COLUMN IF NOT EXISTS notes TEXT")
+                    cur.execute("ALTER TABLE IF EXISTS materials ADD COLUMN IF NOT EXISTS updated_date DATE DEFAULT CURRENT_DATE")
+                    cur.execute("""
+                        CREATE TABLE IF NOT EXISTS material_conversions (
+                            id SERIAL PRIMARY KEY,
+                            source_material_id INT REFERENCES materials(id),
+                            source_purchase_id INT REFERENCES purchases(id),
+                            target_material_id INT REFERENCES materials(id),
+                            source_quantity DECIMAL(12, 4) NOT NULL,
+                            target_quantity DECIMAL(12, 4) NOT NULL,
+                            total_cost DECIMAL(12, 2) NOT NULL DEFAULT 0,
+                            notes TEXT,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        )
+                    """)
+                    cur.execute("ALTER TABLE IF EXISTS material_conversions ADD COLUMN IF NOT EXISTS source_purchase_id INT REFERENCES purchases(id)")
+                    cur.execute("""
+                        SELECT
+                            p.material_id,
+                            COALESCE(p.remaining_quantity, 0),
+                            COALESCE(p.price_per_unit, 0),
+                            m.name,
+                            COALESCE(m.unit, '')
+                        FROM purchases p
+                        JOIN materials m ON m.id = p.material_id
+                        WHERE p.id = %s
+                        FOR UPDATE
+                    """, (purchase_id,))
+                    row = cur.fetchone()
+                    if not row:
+                        return {"ok": False, "message": "Плита/партия не найдена."}
+                    source_material_id, lot_remaining, price_per_unit, source_name, source_unit = row
+                    lot_remaining = Decimal(str(lot_remaining or 0))
+                    price_per_unit = Decimal(str(price_per_unit or 0))
+                    if area > lot_remaining:
+                        return {
+                            "ok": False,
+                            "message": f"В этой плите осталось {lot_remaining:.4f}, нужно {area:.4f}."
+                        }
+                    if clean_name.lower() == (source_name or "").strip().lower():
+                        return {"ok": False, "message": "Название детали должно отличаться от исходного материала."}
+
+                    cur.execute("SELECT COALESCE(quantity, 0) FROM material_inventory WHERE material_id = %s FOR UPDATE", (source_material_id,))
+                    inv_row = cur.fetchone()
+                    inventory_qty = Decimal(str(inv_row[0] if inv_row else 0))
+                    if area > inventory_qty:
+                        return {
+                            "ok": False,
+                            "message": f"Общий остаток материала меньше списания: {inventory_qty:.4f}."
+                        }
+
+                    total_cost = (area * price_per_unit).quantize(Decimal("0.01"))
+                    unit_price = (total_cost / quantity).quantize(Decimal("0.01"))
+                    target_notes = notes.strip() if notes else f"Деталь из партии #{purchase_id}: {source_name}"
+                    cur.execute("""
+                        INSERT INTO materials (name, unit, source, notes, updated_date)
+                        VALUES (%s, %s, %s, %s, CURRENT_DATE)
+                        ON CONFLICT (name) DO UPDATE SET
+                            unit = EXCLUDED.unit,
+                            source = EXCLUDED.source,
+                            notes = COALESCE(EXCLUDED.notes, materials.notes),
+                            updated_date = CURRENT_DATE
+                        RETURNING id
+                    """, (
+                        clean_name,
+                        (part_unit or "шт").strip(),
+                        f"{source_name} / партия #{purchase_id}",
+                        target_notes
+                    ))
+                    target_material_id = cur.fetchone()[0]
+
+                    cur.execute("""
+                        UPDATE purchases
+                        SET remaining_quantity = GREATEST(COALESCE(remaining_quantity, 0) - %s, 0)
+                        WHERE id = %s
+                    """, (area, purchase_id))
+                    cur.execute("""
+                        UPDATE material_inventory
+                        SET quantity = quantity - %s
+                        WHERE material_id = %s
+                    """, (area, source_material_id))
+                    cur.execute("""
+                        INSERT INTO material_inventory (material_id, quantity)
+                        VALUES (%s, %s)
+                        ON CONFLICT (material_id) DO UPDATE
+                        SET quantity = material_inventory.quantity + EXCLUDED.quantity
+                    """, (target_material_id, quantity))
+                    cur.execute("""
+                        INSERT INTO purchases (material_id, price_per_unit, quantity, remaining_quantity, purchase_date, notes)
+                        VALUES (%s, %s, %s, %s, CURRENT_DATE, %s)
+                    """, (
+                        target_material_id,
+                        unit_price,
+                        quantity,
+                        quantity,
+                        f"Изготовлено из {source_name}, партия #{purchase_id}: списано {area} {source_unit}"
+                    ))
+                    cur.execute("""
+                        INSERT INTO material_transactions (material_id, quantity_change, transaction_type, reference_id)
+                        VALUES (%s, %s, 'conversion_out', %s)
+                    """, (source_material_id, -area, target_material_id))
+                    cur.execute("""
+                        INSERT INTO material_transactions (material_id, quantity_change, transaction_type, reference_id)
+                        VALUES (%s, %s, 'conversion_in', %s)
+                    """, (target_material_id, quantity, source_material_id))
+                    cur.execute("""
+                        INSERT INTO material_conversions
+                            (source_material_id, source_purchase_id, target_material_id, source_quantity, target_quantity, total_cost, notes)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    """, (
+                        source_material_id,
+                        purchase_id,
+                        target_material_id,
+                        area,
+                        quantity,
+                        total_cost,
+                        target_notes
+                    ))
+                    conn.commit()
+            return {
+                "ok": True,
+                "message": f"Деталь создана из партии #{purchase_id}. Списано {area:.4f} {source_unit}, добавлено {quantity:.4f} {(part_unit or 'шт').strip()}. Цена детали: {unit_price:.2f} руб."
+            }
+        except Exception as e:
+            print(f"Ошибка перевода плиты в готовую деталь: {e}")
+            return {"ok": False, "message": f"Ошибка перевода плиты: {e}"}
+
     # ---------- РРЅСЃС‚СЂСѓРјРµРЅС‚С‹ ----------
+
+    @Slot(int, str, str, float, str, str, str, float, str, result=bool)
+    def updateMaterial(self, material_id, name, unit, quantity, source, notes, updated_date_str, new_price, reason):
+        try:
+            if material_id <= 0 or not name:
+                return False
+            from datetime import datetime, date
+            updated_date = datetime.strptime(updated_date_str, "%Y-%m-%d").date() if updated_date_str else date.today()
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("ALTER TABLE IF EXISTS materials ADD COLUMN IF NOT EXISTS source TEXT")
+                    cur.execute("ALTER TABLE IF EXISTS materials ADD COLUMN IF NOT EXISTS notes TEXT")
+                    cur.execute("ALTER TABLE IF EXISTS materials ADD COLUMN IF NOT EXISTS updated_date DATE DEFAULT CURRENT_DATE")
+                    cur.execute("""
+                        UPDATE materials
+                        SET name = %s,
+                            unit = %s,
+                            source = %s,
+                            notes = %s,
+                            updated_date = %s
+                        WHERE id = %s
+                    """, (
+                        name.strip(),
+                        unit.strip() if unit else None,
+                        source.strip() if source else None,
+                        notes.strip() if notes else None,
+                        updated_date,
+                        material_id
+                    ))
+
+                    cur.execute("SELECT quantity FROM material_inventory WHERE material_id = %s", (material_id,))
+                    row = cur.fetchone()
+                    old_qty = row[0] if row else Decimal('0')
+                    new_qty = Decimal(str(quantity))
+                    diff = new_qty - old_qty
+                    cur.execute("""
+                        INSERT INTO material_inventory (material_id, quantity) VALUES (%s, %s)
+                        ON CONFLICT (material_id) DO UPDATE SET quantity = EXCLUDED.quantity
+                    """, (material_id, new_qty))
+
+                    if diff != 0:
+                        cur.execute("""
+                            INSERT INTO material_transactions (material_id, quantity_change, transaction_type)
+                            VALUES (%s, %s, 'adjustment')
+                        """, (material_id, diff))
+                        cur.execute("""
+                            INSERT INTO inventory_adjustments (material_id, old_quantity, new_quantity, difference, reason)
+                            VALUES (%s, %s, %s, %s, %s)
+                        """, (material_id, old_qty, new_qty, diff, reason if reason else "Редактирование материала"))
+
+                    if new_price and new_price > 0:
+                        new_price_decimal = Decimal(str(new_price))
+                        cur.execute("""
+                            SELECT price_per_unit
+                            FROM purchases
+                            WHERE material_id = %s AND price_per_unit IS NOT NULL
+                            ORDER BY purchase_date DESC, id DESC
+                            LIMIT 1
+                        """, (material_id,))
+                        price_row = cur.fetchone()
+                        old_price = Decimal(str(price_row[0])) if price_row and price_row[0] is not None else None
+                        if old_price == new_price_decimal:
+                            conn.commit()
+                            return True
+                        cur.execute("""
+                            INSERT INTO purchases (material_id, price_per_unit, quantity, remaining_quantity, purchase_date, notes)
+                            VALUES (%s, %s, 0, 0, CURRENT_DATE, %s)
+                        """, (material_id, new_price_decimal, reason if reason else "Редактирование материала"))
+                    conn.commit()
+            return True
+        except Exception as e:
+            print(f"Error updating material: {e}")
+            return False
+
     @Slot(str, str, float, int, str, result=bool)
     def addTool(self, name, inv_num, cost, life_months, notes):
         try:
@@ -526,6 +1318,50 @@ class BackendController(QObject):
             traceback.print_exc()
             return False
 
+    @Slot(int, result=bool)
+    def cancelProduction(self, finished_good_id):
+        """Отменяет станок в производстве без движения материалов."""
+        try:
+            if finished_good_id <= 0:
+                return False
+            months_to_recalculate = []
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT status, COALESCE(start_date, produced_date, CURRENT_DATE), COALESCE(produced_date, CURRENT_DATE)
+                        FROM finished_goods
+                        WHERE id = %s
+                    """, (finished_good_id,))
+                    row = cur.fetchone()
+                    if not row or row[0] != 'in_progress':
+                        return False
+
+                    _, start_date, end_date = row
+                    if end_date < start_date:
+                        end_date = start_date
+                    y, m = start_date.year, start_date.month
+                    while (y < end_date.year) or (y == end_date.year and m <= end_date.month):
+                        months_to_recalculate.append(f"{y:04d}-{m:02d}")
+                        m += 1
+                        if m > 12:
+                            y += 1
+                            m = 1
+
+                    cur.execute("DELETE FROM indirect_cost_allocations WHERE finished_good_id = %s", (finished_good_id,))
+                    cur.execute("DELETE FROM tool_depreciation WHERE finished_good_id = %s", (finished_good_id,))
+                    cur.execute("DELETE FROM finished_good_labor WHERE finished_good_id = %s", (finished_good_id,))
+                    cur.execute("DELETE FROM finished_goods WHERE id = %s AND status = 'in_progress'", (finished_good_id,))
+                    conn.commit()
+
+            for month in months_to_recalculate:
+                self.recalculateIndirectExpenses(month)
+            return True
+        except Exception as e:
+            print(f"Ошибка отмены производства: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
     # ---------- Р¤РёРЅР°РЅСЃС‹ Рё Р°РЅР°Р»РёС‚РёРєР° ----------
     @Slot(result=str)
     def getTotalAssets(self):
@@ -535,6 +1371,172 @@ class BackendController(QObject):
         except Exception as e:
             print(f"РћС€РёР±РєР° РїРѕР»СѓС‡РµРЅРёСЏ Р°РєС‚РёРІРѕРІ: {e}")
             return "0.00"
+
+
+    def _ensure_tax_schema(self):
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("ALTER TABLE IF EXISTS balance ADD COLUMN IF NOT EXISTS is_cash BOOLEAN DEFAULT FALSE")
+                cur.execute("ALTER TABLE IF EXISTS purchases ADD COLUMN IF NOT EXISTS is_cash BOOLEAN DEFAULT FALSE")
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS tax_payments (
+                        id SERIAL PRIMARY KEY,
+                        payment_date DATE NOT NULL DEFAULT CURRENT_DATE,
+                        period_start DATE NOT NULL,
+                        period_end DATE NOT NULL,
+                        tax_rate DECIMAL(8, 2) NOT NULL DEFAULT 0,
+                        tax_base DECIMAL(12, 2) NOT NULL DEFAULT 0,
+                        tax_amount DECIMAL(12, 2) NOT NULL DEFAULT 0,
+                        notes TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+            conn.commit()
+
+    @Slot(str, str, float, result="QVariantMap")
+    def calculateTaxReport(self, start_date_str, end_date_str, tax_rate):
+        try:
+            from datetime import datetime, date
+            self._ensure_tax_schema()
+            start = datetime.strptime(start_date_str, "%Y-%m-%d").date() if start_date_str else date.today().replace(day=1)
+            end = datetime.strptime(end_date_str, "%Y-%m-%d").date() if end_date_str else date.today()
+            if end < start:
+                start, end = end, start
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT COALESCE(SUM(income), 0), COALESCE(SUM(expense), 0), COUNT(*)
+                        FROM balance
+                        WHERE date BETWEEN %s AND %s
+                          AND COALESCE(is_cash, FALSE) = FALSE
+                    """, (start, end))
+                    income, expense, taxable_count = cur.fetchone()
+                    income = income or Decimal('0')
+                    expense = expense or Decimal('0')
+
+                    cur.execute("""
+                        SELECT COALESCE(SUM(income), 0), COALESCE(SUM(expense), 0), COUNT(*)
+                        FROM balance
+                        WHERE date BETWEEN %s AND %s
+                          AND COALESCE(is_cash, FALSE) = TRUE
+                    """, (start, end))
+                    cash_income, cash_expense, cash_count = cur.fetchone()
+                    cash_income = cash_income or Decimal('0')
+                    cash_expense = cash_expense or Decimal('0')
+
+            base = income - expense
+            if base < 0:
+                base = Decimal('0')
+            rate = Decimal(str(tax_rate or 0))
+            tax = base * rate / Decimal('100')
+            return {
+                "income": float(income),
+                "expense": float(expense),
+                "base": float(base),
+                "tax": float(tax),
+                "rate": float(rate),
+                "cash_income_excluded": float(cash_income),
+                "cash_expense_excluded": float(cash_expense),
+                "taxable_count": int(taxable_count or 0),
+                "cash_count": int(cash_count or 0),
+                "period": f"{start} - {end}"
+            }
+        except Exception as e:
+            print(f"Ошибка расчёта налогов: {e}")
+            return {
+                "income": 0.0,
+                "expense": 0.0,
+                "base": 0.0,
+                "tax": 0.0,
+                "rate": float(tax_rate or 0),
+                "cash_income_excluded": 0.0,
+                "cash_expense_excluded": 0.0,
+                "taxable_count": 0,
+                "cash_count": 0,
+                "period": "",
+                "error": str(e)
+            }
+
+    @Slot(result="QVariantMap")
+    def getLastTaxPayment(self):
+        try:
+            self._ensure_tax_schema()
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT payment_date, period_start, period_end, tax_rate, tax_base, tax_amount, COALESCE(notes, '')
+                        FROM tax_payments
+                        ORDER BY payment_date DESC, id DESC
+                        LIMIT 1
+                    """)
+                    row = cur.fetchone()
+            if not row:
+                return {"ok": True, "has_payment": False}
+            return {
+                "ok": True,
+                "has_payment": True,
+                "payment_date": row[0].isoformat() if row[0] else "",
+                "period_start": row[1].isoformat() if row[1] else "",
+                "period_end": row[2].isoformat() if row[2] else "",
+                "rate": float(row[3] or 0),
+                "base": float(row[4] or 0),
+                "amount": float(row[5] or 0),
+                "notes": row[6] or ""
+            }
+        except Exception as e:
+            print(f"Ошибка чтения последней оплаты налога: {e}")
+            return {"ok": False, "message": f"Ошибка чтения оплаты налога: {e}", "has_payment": False}
+
+    @Slot(str, str, float, result="QVariantMap")
+    def saveTaxPayment(self, start_date_str, end_date_str, tax_rate):
+        try:
+            from datetime import date
+            self._ensure_tax_schema()
+            report = self.calculateTaxReport(start_date_str, end_date_str, tax_rate)
+            period = (report.get("period") or "").split(" - ")
+            if len(period) == 2:
+                period_start, period_end = self._parse_period(period[0], period[1])
+            else:
+                period_start, period_end = self._parse_period(start_date_str, end_date_str)
+            amount = Decimal(str(report.get("tax", 0) or 0)).quantize(Decimal("0.01"))
+            tax_base = Decimal(str(report.get("base", 0) or 0)).quantize(Decimal("0.01"))
+            rate = Decimal(str(report.get("rate", tax_rate or 0))).quantize(Decimal("0.01"))
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        INSERT INTO tax_payments
+                            (payment_date, period_start, period_end, tax_rate, tax_base, tax_amount, notes)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    """, (
+                        date.today(),
+                        period_start,
+                        period_end,
+                        rate,
+                        tax_base,
+                        amount,
+                        f"Оплата налога за период {period_start} - {period_end}"
+                    ))
+                    if amount > 0:
+                        cur.execute("""
+                            INSERT INTO balance (date, expense, notes, is_cash)
+                            VALUES (%s, %s, %s, FALSE)
+                        """, (
+                            date.today(),
+                            amount,
+                            f"Уплата налога за период {period_start} - {period_end}"
+                        ))
+                conn.commit()
+            return {
+                "ok": True,
+                "message": f"Оплата налога сохранена: {amount:.2f} руб.",
+                "payment_date": date.today().isoformat(),
+                "period_start": period_start.isoformat(),
+                "period_end": period_end.isoformat(),
+                "amount": float(amount)
+            }
+        except Exception as e:
+            print(f"Ошибка сохранения оплаты налога: {e}")
+            return {"ok": False, "message": f"Ошибка сохранения оплаты налога: {e}"}
 
     @Slot(str, str, result=str)
     def getMonthlyRevenue(self, start_date_str, end_date_str):
@@ -622,15 +1624,24 @@ class BackendController(QObject):
         """Р’РѕР·РІСЂР°С‰Р°РµС‚ СЃРїРёСЃРѕРє РїСЂРѕРґР°РЅРЅС‹С… СЃС‚Р°РЅРєРѕРІ СЃ РїСЂРёР±С‹Р»СЊСЋ."""
         with get_connection() as conn:
             with conn.cursor() as cur:
+                cur.execute("ALTER TABLE IF EXISTS finished_goods ADD COLUMN IF NOT EXISTS start_date DATE")
                 cur.execute("""
                     SELECT 
                         fg.id,
                         fg.machine_model,
                         fg.inventory_number,
+                        fg.produced_date,
+                        fg.start_date,
+                        fg.indirect_cost,
                         fg.sale_date,
                         fg.buyer,
                         s.sale_price,
-                        s.profit
+                        s.profit,
+                        CASE
+                            WHEN fg.start_date IS NOT NULL AND fg.sale_date IS NOT NULL
+                            THEN (fg.sale_date - fg.start_date)
+                            ELSE NULL
+                        END AS days_to_sale
                     FROM finished_goods fg
                     JOIN sales s ON fg.id = s.finished_good_id
                     WHERE fg.status = 'sold'
@@ -642,10 +1653,14 @@ class BackendController(QObject):
                 "id": r[0],
                 "machine_model": r[1],
                 "inv_num": r[2],
-                "sale_date": str(r[3]) if r[3] else None,
-                "buyer": r[4],
-                "sale_price": float(r[5]) if r[5] else 0.0,
-                "profit": float(r[6]) if r[6] else 0.0
+                "produced_date": str(r[3]) if r[3] else None,
+                "start_date": str(r[4]) if r[4] else None,
+                "indirect_cost": float(r[5]) if r[5] else 0.0,
+                "sale_date": str(r[6]) if r[6] else None,
+                "buyer": r[7],
+                "sale_price": float(r[8]) if r[8] else 0.0,
+                "profit": float(r[9]) if r[9] else 0.0,
+                "days_to_sale": int(r[10]) if r[10] is not None else None
             }
             for r in rows
         ]
@@ -706,127 +1721,181 @@ class BackendController(QObject):
 
     @Slot(int, result="QVariantMap")
     def getMachineCostDetails(self, finished_good_id):
-        """Р’РѕР·РІСЂР°С‰Р°РµС‚ РґРµС‚Р°Р»СЊРЅСѓСЋ СЂР°Р·Р±РёРІРєСѓ СЃРµР±РµСЃС‚РѕРёРјРѕСЃС‚Рё СЃС‚Р°РЅРєР°."""
+        """Возвращает понятную детализацию себестоимости готового станка."""
         try:
+            self._ensure_indirect_schema()
             with get_connection() as conn:
                 with conn.cursor() as cur:
-                    # РћСЃРЅРѕРІРЅР°СЏ РёРЅС„РѕСЂРјР°С†РёСЏ
                     cur.execute("""
-                        SELECT machine_model, cost_price, produced_date, machine_id
-                        FROM finished_goods WHERE id = %s
+                        SELECT machine_model,
+                               COALESCE(cost_price, 0),
+                               produced_date,
+                               start_date,
+                               machine_id,
+                               COALESCE(indirect_cost, 0),
+                               inventory_number,
+                               notes
+                        FROM finished_goods
+                        WHERE id = %s
                     """, (finished_good_id,))
                     fg = cur.fetchone()
                     if not fg:
-                        return {"header": "РЎС‚Р°РЅРѕРє РЅРµ РЅР°Р№РґРµРЅ", "breakdown": ""}
+                        return {"header": "Станок не найден", "breakdown": ""}
 
-                    model, total_cost, prod_date, machine_id = fg
-                    header = f"РЎС‚Р°РЅРѕРє: {model} (ID {finished_good_id})\nРћР±С‰Р°СЏ СЃРµР±РµСЃС‚РѕРёРјРѕСЃС‚СЊ: {total_cost:.2f} в‚Ѕ"
+                    model, total_cost, produced_date, start_date, machine_id, saved_indirect, inv_num, notes = fg
+                    total_cost = Decimal(str(total_cost or 0))
+                    saved_indirect = Decimal(str(saved_indirect or 0))
 
-                    breakdown = f"РџСЂРѕРёР·РІРµРґС‘РЅ: {prod_date}\n\n"
-                    breakdown += "=" * 60 + "\n"
-                    breakdown += "Р РђР—Р‘РР’РљРђ РЎР•Р‘Р•РЎРўРћРРњРћРЎРўР\n"
-                    breakdown += "=" * 60 + "\n\n"
+                    lines = []
+                    lines.append(f"Дата начала производства: {start_date or '-'}")
+                    lines.append(f"Дата окончания производства: {produced_date or '-'}")
+                    if inv_num:
+                        lines.append(f"Инвентарный номер: {inv_num}")
+                    if notes:
+                        lines.append(f"Примечание: {notes}")
+                    lines.append("")
+                    lines.append("=" * 60)
+                    lines.append("Детализация себестоимости")
+                    lines.append("=" * 60)
+                    lines.append("")
 
-                    # РњР°С‚РµСЂРёР°Р»С‹
                     cur.execute("""
                         WITH latest_prices AS (
                             SELECT DISTINCT ON (material_id) material_id, price_per_unit
-                            FROM purchases WHERE price_per_unit IS NOT NULL
-                            ORDER BY material_id, purchase_date DESC
+                            FROM purchases
+                            WHERE price_per_unit IS NOT NULL
+                            ORDER BY material_id, purchase_date DESC, id DESC
                         )
-                        SELECT m.name, mm.quantity, lp.price_per_unit, (mm.quantity * lp.price_per_unit) as total
+                        SELECT m.name,
+                               COALESCE(mm.quantity, 0),
+                               COALESCE(lp.price_per_unit, 0),
+                               COALESCE(mm.quantity, 0) * COALESCE(lp.price_per_unit, 0) AS total
                         FROM machine_materials mm
                         JOIN materials m ON mm.material_id = m.id
                         LEFT JOIN latest_prices lp ON mm.material_id = lp.material_id
                         WHERE mm.machine_id = %s
-                        ORDER BY total DESC
+                        ORDER BY total DESC, m.name
                     """, (machine_id,))
                     materials = cur.fetchall()
-                    
-                    materials_total = Decimal('0')
-                    breakdown += "РњРђРўР•Р РРђР›Р«:\n"
-                    breakdown += "-" * 60 + "\n"
-                    for name, qty, price, total in materials:
-                        if price:
-                            breakdown += f"{name:<35} {qty:>8.2f} Г— {price:>8.2f} = {total:>10.2f} в‚Ѕ\n"
-                            materials_total += total
-                    breakdown += "-" * 60 + "\n"
-                    breakdown += f"{'РРўРћР“Рћ РњРђРўР•Р РРђР›Р«:':<52} {materials_total:>10.2f} в‚Ѕ\n\n"
 
-                    # РўСЂСѓРґРѕР·Р°С‚СЂР°С‚С‹
+                    materials_total = Decimal('0')
+                    lines.append("Материалы:")
+                    lines.append("-" * 60)
+                    if materials:
+                        for name, qty, price, row_total in materials:
+                            qty = Decimal(str(qty or 0))
+                            price = Decimal(str(price or 0))
+                            row_total = Decimal(str(row_total or 0))
+                            materials_total += row_total
+                            lines.append(f"{name:<32} {qty:>8.2f} x {price:>10.2f} = {row_total:>10.2f} руб.")
+                    else:
+                        lines.append("Материалы не найдены")
+                    lines.append("-" * 60)
+                    lines.append(f"{'Итого материалы:':<52} {materials_total:>10.2f} руб.")
+                    lines.append("")
+
                     cur.execute("""
-                        SELECT e.name, wl.hours, e.hourly_rate, (wl.hours * e.hourly_rate) as cost
+                        SELECT e.name,
+                               COALESCE(wl.hours, 0),
+                               COALESCE(e.hourly_rate, 0),
+                               COALESCE(wl.hours, 0) * COALESCE(e.hourly_rate, 0) AS cost
                         FROM work_logs wl
                         JOIN employees e ON wl.employee_id = e.id
                         JOIN finished_good_labor fgl ON wl.id = fgl.work_log_id
                         WHERE fgl.finished_good_id = %s
-                        ORDER BY cost DESC
+                        ORDER BY cost DESC, e.name
                     """, (finished_good_id,))
                     labor = cur.fetchall()
 
                     labor_total = Decimal('0')
+                    lines.append("Работа сотрудников:")
+                    lines.append("-" * 60)
                     if labor:
-                        breakdown += "РўР РЈР”РћР—РђРўР РђРўР«:\n"
-                        breakdown += "-" * 60 + "\n"
                         for emp_name, hours, rate, cost in labor:
-                            breakdown += f"{emp_name:<35} {hours:>8.2f} С‡ Г— {rate:>8.2f} = {cost:>10.2f} в‚Ѕ\n"
+                            hours = Decimal(str(hours or 0))
+                            rate = Decimal(str(rate or 0))
+                            cost = Decimal(str(cost or 0))
                             labor_total += cost
-                        breakdown += "-" * 60 + "\n"
-                        breakdown += f"{'РРўРћР“Рћ Р РђР‘РћРўРђ:':<52} {labor_total:>10.2f} в‚Ѕ\n\n"
+                            lines.append(f"{emp_name:<32} {hours:>8.2f} ч x {rate:>8.2f} = {cost:>10.2f} руб.")
+                    else:
+                        lines.append("Работы по станку не найдены")
+                    lines.append("-" * 60)
+                    lines.append(f"{'Итого работа:':<52} {labor_total:>10.2f} руб.")
+                    lines.append("")
 
-                    # РђРјРѕСЂС‚РёР·Р°С†РёСЏ РёРЅСЃС‚СЂСѓРјРµРЅС‚РѕРІ
                     cur.execute("""
-                        SELECT t.name, td.amount
+                        SELECT t.name, COALESCE(td.amount, 0)
                         FROM tool_depreciation td
                         JOIN tools t ON td.tool_id = t.id
                         WHERE td.finished_good_id = %s
+                        ORDER BY td.amount DESC, t.name
                     """, (finished_good_id,))
-                    tools_depr = cur.fetchall()
+                    tool_rows = cur.fetchall()
 
                     tools_total = Decimal('0')
-                    if tools_depr:
-                        breakdown += "РђРњРћР РўРР—РђР¦РРЇ РРќРЎРўР РЈРњР•РќРўРћР’:\n"
-                        breakdown += "-" * 60 + "\n"
-                        for tool_name, amount in tools_depr:
-                            breakdown += f"{tool_name:<52} {amount:>10.2f} в‚Ѕ\n"
+                    lines.append("Амортизация инструментов:")
+                    lines.append("-" * 60)
+                    if tool_rows:
+                        for tool_name, amount in tool_rows:
+                            amount = Decimal(str(amount or 0))
                             tools_total += amount
-                        breakdown += "-" * 60 + "\n"
-                        breakdown += f"{'РРўРћР“Рћ РђРњРћР РўРР—РђР¦РРЇ:':<52} {tools_total:>10.2f} в‚Ѕ\n\n"
+                            lines.append(f"{tool_name:<52} {amount:>10.2f} руб.")
+                    else:
+                        lines.append("Амортизация не начислялась")
+                    lines.append("-" * 60)
+                    lines.append(f"{'Итого амортизация:':<52} {tools_total:>10.2f} руб.")
+                    lines.append("")
 
-                    # Косвенные расходы
                     cur.execute("""
-                        SELECT c.name, a.allocation_date, a.amount
+                        SELECT c.name, a.allocation_date, COALESCE(a.amount, 0)
                         FROM indirect_cost_allocations a
                         JOIN indirect_expense_categories c ON c.id = a.category_id
                         WHERE a.finished_good_id = %s
                         ORDER BY a.allocation_date, c.name
                     """, (finished_good_id,))
                     indirect_rows = cur.fetchall()
-                    indirect_total = Decimal('0')
-                    if indirect_rows:
-                        breakdown += "КОСВЕННЫЕ РАСХОДЫ:\n"
-                        breakdown += "-" * 60 + "\n"
-                        for cat_name, alloc_date, amount in indirect_rows:
-                            breakdown += f"{str(alloc_date):<12} {cat_name:<38} {amount:>10.2f} ₽\n"
-                            indirect_total += amount
-                        breakdown += "-" * 60 + "\n"
-                        breakdown += f"{'ИТОГО КОСВЕННЫЕ:':<52} {indirect_total:>10.2f} ₽\n\n"
 
-                    breakdown += "=" * 60 + "\n"
-                    calculated_total = materials_total + labor_total + tools_total + indirect_total
-                    breakdown += f"{'Р РђРЎР§РЃРўРќРђРЇ РЎР•Р‘Р•РЎРўРћРРњРћРЎРўР¬:':<52} {calculated_total:>10.2f} в‚Ѕ\n"
-                    breakdown += f"{'Р—РђРџРРЎРђРќРћ Р’ Р‘Р”:':<52} {total_cost:>10.2f} в‚Ѕ\n"
-                    
+                    allocated_indirect_total = Decimal('0')
+                    lines.append("Косвенные расходы:")
+                    lines.append("-" * 60)
+                    if indirect_rows:
+                        for cat_name, allocation_date, amount in indirect_rows:
+                            amount = Decimal(str(amount or 0))
+                            allocated_indirect_total += amount
+                            lines.append(f"{str(allocation_date):<12} {cat_name:<38} {amount:>10.2f} руб.")
+                    else:
+                        lines.append("Распределения не найдены")
+                    display_indirect = allocated_indirect_total if indirect_rows else saved_indirect
+                    if not indirect_rows and saved_indirect:
+                        lines.append(f"{'Сохранено в карточке станка:':<52} {saved_indirect:>10.2f} руб.")
+                    lines.append("-" * 60)
+                    lines.append(f"{'Итого косвенные расходы:':<52} {display_indirect:>10.2f} руб.")
+                    lines.append("")
+
+                    calculated_total = materials_total + labor_total + tools_total + display_indirect
+                    base_total = total_cost - saved_indirect
+                    calculated_base_total = calculated_total - display_indirect
+
+                    lines.append("=" * 60)
+                    lines.append(f"{'Материалы + работа + амортизация:':<52} {calculated_base_total:>10.2f} руб.")
+                    lines.append(f"{'Косвенные расходы:':<52} {display_indirect:>10.2f} руб.")
+                    lines.append(f"{'Расчётная себестоимость:':<52} {calculated_total:>10.2f} руб.")
+                    lines.append(f"{'Сохранено в станке:':<52} {total_cost:>10.2f} руб.")
+                    lines.append(f"{'Без косвенных расходов:':<52} {base_total:>10.2f} руб.")
                     diff = total_cost - calculated_total
                     if abs(diff) > Decimal('0.01'):
-                        breakdown += f"{'Р РђР—РќРР¦Рђ:':<52} {diff:>10.2f} в‚Ѕ\n"
+                        lines.append(f"{'Расхождение:':<52} {diff:>10.2f} руб.")
 
-                    return {"header": header, "breakdown": breakdown}
+                    header = (
+                        f"Станок: {model} (ID {finished_good_id})\n"
+                        f"Себестоимость: {total_cost:.2f} руб. "
+                        f"(без косвенных расходов: {base_total:.2f} руб.)"
+                    )
+                    return {"header": header, "breakdown": "\n".join(lines)}
 
         except Exception as e:
-            print(f"РћС€РёР±РєР° РїРѕР»СѓС‡РµРЅРёСЏ РґРµС‚Р°Р»РµР№: {e}")
-            return {"header": "РћС€РёР±РєР°", "breakdown": str(e)}
-
+            print(f"Ошибка получения деталей себестоимости: {e}")
+            return {"header": "Ошибка", "breakdown": str(e)}
     @Slot(int, result=bool)
     def returnMachineToStock(self, finished_good_id):
         """Р’РѕР·РІСЂР°С‰Р°РµС‚ РїСЂРѕРґР°РЅРЅС‹Р№ СЃС‚Р°РЅРѕРє РЅР° СЃРєР»Р°Рґ, СѓРґР°Р»СЏРµС‚ Р·Р°РїРёСЃСЊ Рѕ РїСЂРѕРґР°Р¶Рµ."""
@@ -1113,6 +2182,171 @@ class BackendController(QObject):
             traceback.print_exc()
             return []
 
+
+    def _write_purchase_materials_excel(self, rows, filename_prefix):
+        from datetime import datetime
+        import os
+        import pandas as pd
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{filename_prefix}_{timestamp}.xlsx"
+        filepath = os.path.abspath(filename)
+        columns = [
+            "Материал",
+            "Ед. изм.",
+            "Требуется",
+            "На складе",
+            "Купить",
+            "Цена за ед.",
+            "Сумма",
+            "Откуда взят",
+            "Примечание",
+            "Станки"
+        ]
+        if not rows:
+            return ""
+        df = pd.DataFrame(rows, columns=columns)
+        with pd.ExcelWriter(filepath, engine="openpyxl") as writer:
+            df.to_excel(writer, sheet_name="Купить", index=False)
+            worksheet = writer.sheets["Купить"]
+            for column_cells in worksheet.columns:
+                max_length = 0
+                column_letter = column_cells[0].column_letter
+                for cell in column_cells:
+                    value = "" if cell.value is None else str(cell.value)
+                    max_length = max(max_length, len(value))
+                worksheet.column_dimensions[column_letter].width = min(max(max_length + 2, 12), 45)
+        return filepath
+
+    @Slot(int, result=str)
+    def exportMissingMaterialsForMachine(self, finished_good_id):
+        try:
+            self._ensure_indirect_schema()
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT machine_id, machine_model
+                        FROM finished_goods
+                        WHERE id = %s AND status = 'in_progress'
+                    """, (finished_good_id,))
+                    fg = cur.fetchone()
+                    if not fg:
+                        return ""
+                    machine_id, machine_model = fg
+                    cur.execute("""
+                        WITH latest_prices AS (
+                            SELECT DISTINCT ON (material_id) material_id, price_per_unit
+                            FROM purchases
+                            WHERE price_per_unit IS NOT NULL
+                            ORDER BY material_id, purchase_date DESC NULLS LAST, id DESC
+                        )
+                        SELECT m.name,
+                               COALESCE(m.unit, ''),
+                               COALESCE(mm.quantity, 0) AS required_qty,
+                               COALESCE(inv.quantity, 0) AS in_stock,
+                               GREATEST(COALESCE(mm.quantity, 0) - COALESCE(inv.quantity, 0), 0) AS to_buy,
+                               COALESCE(lp.price_per_unit, 0) AS price_per_unit,
+                               COALESCE(m.source, ''),
+                               COALESCE(m.notes, '')
+                        FROM machine_materials mm
+                        JOIN materials m ON m.id = mm.material_id
+                        LEFT JOIN material_inventory inv ON inv.material_id = mm.material_id
+                        LEFT JOIN latest_prices lp ON lp.material_id = mm.material_id
+                        WHERE mm.machine_id = %s
+                          AND GREATEST(COALESCE(mm.quantity, 0) - COALESCE(inv.quantity, 0), 0) > 0
+                        ORDER BY to_buy DESC, m.name
+                    """, (machine_id,))
+                    rows = []
+                    for name, unit, required_qty, in_stock, to_buy, price, source, notes in cur.fetchall():
+                        required_qty = Decimal(str(required_qty or 0))
+                        in_stock = Decimal(str(in_stock or 0))
+                        to_buy = Decimal(str(to_buy or 0))
+                        price = Decimal(str(price or 0))
+                        rows.append([
+                            name,
+                            unit,
+                            float(required_qty),
+                            float(in_stock),
+                            float(to_buy),
+                            float(price),
+                            float(to_buy * price),
+                            source,
+                            notes,
+                            f"{machine_model} (ID {finished_good_id})"
+                        ])
+            return self._write_purchase_materials_excel(rows, f"materials_to_buy_machine_{finished_good_id}")
+        except Exception as e:
+            print(f"Ошибка выгрузки материалов для выбранного станка: {e}")
+            import traceback
+            traceback.print_exc()
+            return ""
+
+    @Slot(result=str)
+    def exportMissingMaterialsForAllInProgress(self):
+        try:
+            self._ensure_indirect_schema()
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        WITH in_progress AS (
+                            SELECT id, machine_id, machine_model
+                            FROM finished_goods
+                            WHERE status = 'in_progress'
+                        ), required_by_material AS (
+                            SELECT mm.material_id,
+                                   SUM(COALESCE(mm.quantity, 0)) AS required_qty,
+                                   STRING_AGG(ip.machine_model || ' (ID ' || ip.id || ')', ', ' ORDER BY ip.machine_model, ip.id) AS machines
+                            FROM in_progress ip
+                            JOIN machine_materials mm ON mm.machine_id = ip.machine_id
+                            GROUP BY mm.material_id
+                        ), latest_prices AS (
+                            SELECT DISTINCT ON (material_id) material_id, price_per_unit
+                            FROM purchases
+                            WHERE price_per_unit IS NOT NULL
+                            ORDER BY material_id, purchase_date DESC NULLS LAST, id DESC
+                        )
+                        SELECT m.name,
+                               COALESCE(m.unit, ''),
+                               COALESCE(r.required_qty, 0) AS required_qty,
+                               COALESCE(inv.quantity, 0) AS in_stock,
+                               GREATEST(COALESCE(r.required_qty, 0) - COALESCE(inv.quantity, 0), 0) AS to_buy,
+                               COALESCE(lp.price_per_unit, 0) AS price_per_unit,
+                               COALESCE(m.source, ''),
+                               COALESCE(m.notes, ''),
+                               COALESCE(r.machines, '')
+                        FROM required_by_material r
+                        JOIN materials m ON m.id = r.material_id
+                        LEFT JOIN material_inventory inv ON inv.material_id = r.material_id
+                        LEFT JOIN latest_prices lp ON lp.material_id = r.material_id
+                        WHERE GREATEST(COALESCE(r.required_qty, 0) - COALESCE(inv.quantity, 0), 0) > 0
+                        ORDER BY to_buy DESC, m.name
+                    """)
+                    rows = []
+                    for name, unit, required_qty, in_stock, to_buy, price, source, notes, machines in cur.fetchall():
+                        required_qty = Decimal(str(required_qty or 0))
+                        in_stock = Decimal(str(in_stock or 0))
+                        to_buy = Decimal(str(to_buy or 0))
+                        price = Decimal(str(price or 0))
+                        rows.append([
+                            name,
+                            unit,
+                            float(required_qty),
+                            float(in_stock),
+                            float(to_buy),
+                            float(price),
+                            float(to_buy * price),
+                            source,
+                            notes,
+                            machines
+                        ])
+            return self._write_purchase_materials_excel(rows, "materials_to_buy_all_in_progress")
+        except Exception as e:
+            print(f"Ошибка выгрузки материалов для всех станков в процессе: {e}")
+            import traceback
+            traceback.print_exc()
+            return ""
+
+
     @Slot(int, result=str)
     def getDisassemblePreview(self, finished_good_id):
         """РџРѕРєР°Р·С‹РІР°РµС‚ РїСЂРµРґРїСЂРѕСЃРјРѕС‚СЂ С‡С‚Рѕ РІРµСЂРЅС‘С‚СЃСЏ РЅР° СЃРєР»Р°Рґ РїСЂРё СЂР°Р·Р±РѕСЂРєРµ."""
@@ -1280,59 +2514,79 @@ class BackendController(QObject):
             traceback.print_exc()
             return False
 
-    @Slot(int, str, float, result=bool)
-    def updateFinishedGood(self, finished_good_id, produced_date_str, indirect_cost):
+    @Slot(int, str, str, str, str, float, float, str, result=bool)
+    def updateFinishedGood(self, finished_good_id, machine_model, inventory_number, start_date_str, produced_date_str, cost_price, indirect_cost, notes):
         try:
             from datetime import datetime
             self._ensure_indirect_schema()
-            produced_date = datetime.strptime(produced_date_str, "%Y-%m-%d").date()
+            start_date = datetime.strptime(start_date_str, "%Y-%m-%d").date() if start_date_str else None
+            produced_date = datetime.strptime(produced_date_str, "%Y-%m-%d").date() if produced_date_str else None
             with get_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute("""
                         UPDATE finished_goods
-                        SET produced_date = %s,
-                            indirect_cost = %s
+                        SET machine_model = %s,
+                            inventory_number = %s,
+                            start_date = %s,
+                            produced_date = %s,
+                            cost_price = %s,
+                            indirect_cost = %s,
+                            notes = %s
                         WHERE id = %s AND status = 'completed'
-                    """, (produced_date, Decimal(str(indirect_cost)), finished_good_id))
-                    cur.execute("""
-                        UPDATE finished_goods fg
-                        SET cost_price = COALESCE(base.base_cost, 0) + COALESCE(fg.indirect_cost, 0)
-                        FROM (
-                            SELECT
-                                fg2.id AS finished_good_id,
-                                COALESCE(SUM(mm.quantity * p.price_per_unit), 0) +
-                                COALESCE((
-                                    SELECT SUM(fgl.hours_worked * e.hourly_rate)
-                                    FROM finished_good_labor fgl
-                                    JOIN work_logs wl ON wl.id = fgl.work_log_id
-                                    JOIN employees e ON e.id = wl.employee_id
-                                    WHERE fgl.finished_good_id = fg2.id
-                                ), 0) +
-                                COALESCE((
-                                    SELECT SUM(COALESCE(t.monthly_depreciation, 0))
-                                    FROM machine_tools mt
-                                    JOIN tools t ON t.id = mt.tool_id
-                                    WHERE mt.machine_id = fg2.machine_id
-                                ), 0) AS base_cost
-                            FROM finished_goods fg2
-                            LEFT JOIN machines m ON m.id = fg2.machine_id
-                            LEFT JOIN machine_materials mm ON mm.machine_id = m.id
-                            LEFT JOIN LATERAL (
-                                SELECT price_per_unit
-                                FROM purchases
-                                WHERE material_id = mm.material_id
-                                ORDER BY purchase_date DESC, id DESC
-                                LIMIT 1
-                            ) p ON TRUE
-                            WHERE fg2.id = %s
-                            GROUP BY fg2.id
-                        ) base
-                        WHERE fg.id = base.finished_good_id
-                    """, (finished_good_id,))
+                    """, (
+                        machine_model.strip() if machine_model else None,
+                        inventory_number.strip() if inventory_number else None,
+                        start_date,
+                        produced_date,
+                        Decimal(str(cost_price)),
+                        Decimal(str(indirect_cost)),
+                        notes.strip() if notes else None,
+                        finished_good_id
+                    ))
                     conn.commit()
             return True
         except Exception as e:
             print(f"Ошибка обновления готового станка: {e}")
+            return False
+    @Slot(int, str, str, str, str, float, result=bool)
+    def updateSoldMachine(self, finished_good_id, inventory_number, buyer, sale_date_str, produced_date_str, indirect_cost):
+        try:
+            from datetime import datetime
+            self._ensure_indirect_schema()
+            sale_date = datetime.strptime(sale_date_str, "%Y-%m-%d").date() if sale_date_str else None
+            produced_date = datetime.strptime(produced_date_str, "%Y-%m-%d").date() if produced_date_str else None
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        UPDATE finished_goods
+                        SET inventory_number = %s,
+                            buyer = %s,
+                            sale_date = %s,
+                            produced_date = COALESCE(%s, produced_date),
+                            cost_price = GREATEST(cost_price - COALESCE(indirect_cost, 0), 0) + %s,
+                            indirect_cost = %s
+                        WHERE id = %s AND status = 'sold'
+                    """, (
+                        inventory_number if inventory_number else None,
+                        buyer if buyer else None,
+                        sale_date,
+                        produced_date,
+                        Decimal(str(indirect_cost)),
+                        Decimal(str(indirect_cost)),
+                        finished_good_id
+                    ))
+                    cur.execute("""
+                        UPDATE sales s
+                        SET sale_date = COALESCE(%s, sale_date),
+                            profit = sale_price - (
+                                SELECT cost_price FROM finished_goods WHERE id = s.finished_good_id
+                            )
+                        WHERE s.finished_good_id = %s
+                    """, (sale_date, finished_good_id))
+                    conn.commit()
+            return True
+        except Exception as e:
+            print(f"Error updating sold machine: {e}")
             return False
 
     @Slot(result="QVariantList")
@@ -1450,6 +2704,12 @@ class BackendController(QObject):
                                     """, (cat_id, fg_id, day, per_machine))
                             day += timedelta(days=1)
 
+                    cur.execute("DROP TABLE IF EXISTS tmp_finished_goods_base_cost")
+                    cur.execute("""
+                        CREATE TEMP TABLE tmp_finished_goods_base_cost AS
+                        SELECT id, GREATEST(cost_price - COALESCE(indirect_cost, 0), 0) AS base_cost
+                        FROM finished_goods
+                    """)
                     cur.execute("UPDATE finished_goods SET indirect_cost = 0")
                     cur.execute("""
                         UPDATE finished_goods fg
@@ -1463,43 +2723,71 @@ class BackendController(QObject):
                     """)
                     cur.execute("""
                         UPDATE finished_goods fg
-                        SET cost_price = COALESCE(base.base_cost, 0) + COALESCE(fg.indirect_cost, 0)
-                        FROM (
-                            SELECT
-                                fg2.id AS finished_good_id,
-                                COALESCE(SUM(mm.quantity * p.price_per_unit), 0) +
-                                COALESCE((
-                                    SELECT SUM(fgl.hours_worked * e.hourly_rate)
-                                    FROM finished_good_labor fgl
-                                    JOIN work_logs wl ON wl.id = fgl.work_log_id
-                                    JOIN employees e ON e.id = wl.employee_id
-                                    WHERE fgl.finished_good_id = fg2.id
-                                ), 0) +
-                                COALESCE((
-                                    SELECT SUM(COALESCE(t.monthly_depreciation, 0))
-                                    FROM machine_tools mt
-                                    JOIN tools t ON t.id = mt.tool_id
-                                    WHERE mt.machine_id = fg2.machine_id
-                                ), 0) AS base_cost
-                            FROM finished_goods fg2
-                            LEFT JOIN machines m ON m.id = fg2.machine_id
-                            LEFT JOIN machine_materials mm ON mm.machine_id = m.id
-                            LEFT JOIN LATERAL (
-                                SELECT price_per_unit
-                                FROM purchases
-                                WHERE material_id = mm.material_id
-                                ORDER BY purchase_date DESC, id DESC
-                                LIMIT 1
-                            ) p ON TRUE
-                            GROUP BY fg2.id
-                        ) base
-                        WHERE fg.id = base.finished_good_id
+                        SET cost_price = COALESCE(t.base_cost, 0) + COALESCE(fg.indirect_cost, 0)
+                        FROM tmp_finished_goods_base_cost t
+                        WHERE fg.id = t.id
                     """)
+                    cur.execute("DROP TABLE IF EXISTS tmp_finished_goods_base_cost")
                     conn.commit()
             return True
         except Exception as e:
             print(f"Ошибка пересчёта косвенных расходов: {e}")
             return False
+
+    @Slot(str, str, result="QVariantMap")
+    def getIndirectIdleSummary(self, date_from_str, date_to_str):
+        try:
+            import calendar
+            from datetime import date, timedelta
+            self._ensure_indirect_schema()
+            date_from, date_to = self._parse_period(date_from_str, date_to_str)
+            today = date.today()
+            if date_to > today:
+                date_to = today
+
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT id, monthly_amount
+                        FROM indirect_expense_categories
+                        WHERE is_active = TRUE
+                    """)
+                    categories = cur.fetchall()
+
+                    idle_days = 0
+                    idle_amount = Decimal("0.00")
+                    day = date_from
+                    while day <= date_to:
+                        cur.execute("""
+                            SELECT COUNT(*)
+                            FROM finished_goods
+                            WHERE start_date <= %s
+                              AND (
+                                  (status = 'in_progress' AND %s <= CURRENT_DATE)
+                                  OR
+                                  (status <> 'in_progress' AND produced_date IS NOT NULL AND produced_date >= %s)
+                              )
+                        """, (day, day, day))
+                        in_production = cur.fetchone()[0] or 0
+                        if in_production == 0:
+                            idle_days += 1
+                            _, days_in_month = calendar.monthrange(day.year, day.month)
+                            for _, monthly_amount in categories:
+                                idle_amount += (monthly_amount or Decimal("0.00")) / Decimal(days_in_month)
+                        day += timedelta(days=1)
+
+            idle_amount = idle_amount.quantize(Decimal("0.01"))
+            return {
+                "ok": True,
+                "date_from": date_from.isoformat(),
+                "date_to": date_to.isoformat(),
+                "idle_days": idle_days,
+                "amount": float(idle_amount),
+                "active_categories": len(categories)
+            }
+        except Exception as e:
+            print(f"Ошибка расчёта простоя по косвенным расходам: {e}")
+            return {"ok": False, "message": f"Ошибка расчёта простоя: {e}", "idle_days": 0, "amount": 0}
 
     @Slot(str, result="QVariantList")
     def getIndirectAllocations(self, month_str):
@@ -1588,4 +2876,3 @@ class BackendController(QObject):
             print(f"РћС‚С‡С‘С‚ СЃРѕС…СЂР°РЅС‘РЅ РІ {filename}")
         except Exception as e:
             print(f"РћС€РёР±РєР° СЌРєСЃРїРѕСЂС‚Р°: {e}")
-

@@ -26,6 +26,7 @@ Page {
             id: tab1Root
             property int selectedInProgressId: -1
             property int selectedRow: -1
+            property string exportMessage: ""
 
             InProgressModel { id: inProgressModel }
 
@@ -46,13 +47,13 @@ Page {
                         RowLayout {
                             Layout.fillWidth: true
                             Label {
-                                text: "Machines in production"
+                                text: "Станки в производстве"
                                 font.pixelSize: 16
                                 font.bold: true
                             }
                             Item { Layout.fillWidth: true }
                             Button {
-                                text: "Refresh"
+                                text: "Обновить"
                                 onClicked: {
                                     inProgressModel.refresh()
                                     if (tab1Root.selectedInProgressId > 0) {
@@ -71,7 +72,7 @@ Page {
                                 anchors.fill: parent
                                 spacing: 0
                                 Repeater {
-                                    model: ["ID", "Model", "Start date", "Status"]
+                                    model: ["#", "Модель", "Дата начала", "Статус"]
                                     Rectangle {
                                         width: index === 0 ? 50 : index === 1 ? 180 : index === 2 ? 120 : 50
                                         height: 30
@@ -131,22 +132,50 @@ Page {
                         RowLayout {
                             Layout.fillWidth: true
                             Button {
-                                text: "Complete production"
+                                text: "Завершить производство"
                                 enabled: tab1Root.selectedInProgressId > 0 && materialsCheckList.allMaterialsAvailable
                                 highlighted: tab1Root.selectedInProgressId > 0 && materialsCheckList.allMaterialsAvailable
                                 onClicked: completeDialog.open()
                             }
+                            Button {
+                                text: "Отменить производство"
+                                enabled: tab1Root.selectedInProgressId > 0
+                                onClicked: cancelProductionDialog.open()
+                            }
+                            Button {
+                                text: "Excel: выбранный"
+                                enabled: tab1Root.selectedInProgressId > 0
+                                onClicked: {
+                                    var path = backend.exportMissingMaterialsForMachine(tab1Root.selectedInProgressId)
+                                    tab1Root.exportMessage = path ? "Файл создан: " + path : "Нет материалов для покупки или ошибка выгрузки"
+                                }
+                            }
+                            Button {
+                                text: "Excel: все"
+                                onClicked: {
+                                    var path = backend.exportMissingMaterialsForAllInProgress()
+                                    tab1Root.exportMessage = path ? "Файл создан: " + path : "Нет материалов для покупки или ошибка выгрузки"
+                                }
+                            }
                             Label {
                                 visible: tab1Root.selectedInProgressId > 0 && !materialsCheckList.allMaterialsAvailable
-                                text: "• Material check available"
+                                text: "Материалы доступны"
                                 color: "#d9534f"
                                 font.bold: true
                             }
                         }
+
+                        Label {
+                            visible: tab1Root.exportMessage.length > 0
+                            text: tab1Root.exportMessage
+                            color: "#2f6f3e"
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                        }
                     }
                 }
 
-                // ПРАВАЯ ПАНЕЛЬ: Проверка материалов
+                // Р СџР В Р С’Р вЂ™Р С’Р Р‡ Р СџР С’Р СњР вЂўР вЂєР В¬: Р СџРЎР‚Р С•Р Р†Р ВµРЎР‚Р С”Р В° Р СР В°РЎвЂљР ВµРЎР‚Р С‘Р В°Р В»Р С•Р Р†
                 Item {
                     SplitView.fillWidth: true
                     SplitView.minimumWidth: 450
@@ -158,13 +187,13 @@ Page {
 
                         Label {
                             text: tab1Root.selectedInProgressId > 0 ? 
-                                "Требуемые материалы (ID станка: " + tab1Root.selectedInProgressId + ")" : 
-                                "Выберите станок для просмотра материалов"
+                                "Выбранный станок (ID " + tab1Root.selectedInProgressId + ")" :
+                                "Выберите станок слева, чтобы посмотреть проверку материалов"
                             font.pixelSize: 16
                             font.bold: true
                         }
 
-                        // Заголовок таблицы материалов
+                        // Р вЂ”Р В°Р С–Р С•Р В»Р С•Р Р†Р С•Р С” РЎвЂљР В°Р В±Р В»Р С‘РЎвЂ РЎвЂ№ Р СР В°РЎвЂљР ВµРЎР‚Р С‘Р В°Р В»Р С•Р Р†
                         Rectangle {
                             Layout.fillWidth: true
                             height: 35
@@ -176,7 +205,7 @@ Page {
                                 anchors.fill: parent
                                 spacing: 0
                                 Repeater {
-                                    model: ["Материал", "Требуется", "В наличии", "Статус"]
+                                    model: ["Материал", "Требуется", "На складе", "Доступно"]
                                     Rectangle {
                                         width: index === 0 ? 200 : index === 1 ? 100 : index === 2 ? 100 : 100
                                         height: 35
@@ -193,7 +222,7 @@ Page {
                             }
                         }
 
-                        // Список материалов
+                        // Р РЋР С—Р С‘РЎРѓР С•Р С” Р СР В°РЎвЂљР ВµРЎР‚Р С‘Р В°Р В»Р С•Р Р†
                         ScrollView {
                             Layout.fillWidth: true
                             Layout.fillHeight: true
@@ -217,7 +246,7 @@ Page {
                                         anchors.fill: parent
                                         spacing: 0
 
-                                        // Материал
+                                        // Р СљР В°РЎвЂљР ВµРЎР‚Р С‘Р В°Р В»
                                         Rectangle {
                                             width: 200
                                             height: 40
@@ -233,7 +262,7 @@ Page {
                                             }
                                         }
 
-                                        // Требуется
+                                        // Р СћРЎР‚Р ВµР В±РЎС“Р ВµРЎвЂљРЎРѓРЎРЏ
                                         Rectangle {
                                             width: 100
                                             height: 40
@@ -246,7 +275,7 @@ Page {
                                             }
                                         }
 
-                                        // В наличии
+                                        // Р вЂ™ Р Р…Р В°Р В»Р С‘РЎвЂЎР С‘Р С‘
                                         Rectangle {
                                             width: 100
                                             height: 40
@@ -260,14 +289,14 @@ Page {
                                             }
                                         }
 
-                                        // Статус
+                                        // Р РЋРЎвЂљР В°РЎвЂљРЎС“РЎРѓ
                                         Rectangle {
                                             width: 100
                                             height: 40
                                             color: "transparent"
                                             Text {
                                                 anchors.centerIn: parent
-                                                text: model.available ? "✓ OK" : "✗ Мало"
+                                                text: model.available ? "OK" : "Не хватает"
                                                 font.pixelSize: 13
                                                 font.bold: true
                                                 color: model.available ? "#28a745" : "#dc3545"
@@ -294,38 +323,37 @@ Page {
 
                         Label {
                             visible: tab1Root.selectedInProgressId > 0 && materialsCheckModel.count === 0
-                            text: "Для этого станка не требуется материалов из спецификации"
+                            text: "Для этого станка материалы не найдены"
                             color: "#666"
                             Layout.alignment: Qt.AlignHCenter
                         }
 
                         Label {
                             visible: tab1Root.selectedInProgressId <= 0
-                            text: "Выберите станок в списке слева для просмотра требуемых материалов"
+                            text: "Выберите станок слева, чтобы посмотреть проверку материалов"
                             color: "#999"
                             font.pixelSize: 14
                             Layout.alignment: Qt.AlignHCenter
                         }
 
-                        // Информация о недостающих материалах
+                        // Р ВР Р…РЎвЂћР С•РЎР‚Р СР В°РЎвЂ Р С‘РЎРЏ Р С• Р Р…Р ВµР Т‘Р С•РЎРѓРЎвЂљР В°РЎР‹РЎвЂ°Р С‘РЎвЂ¦ Р СР В°РЎвЂљР ВµРЎР‚Р С‘Р В°Р В»Р В°РЎвЂ¦
                         GroupBox {
                             Layout.fillWidth: true
                             visible: tab1Root.selectedInProgressId > 0 && !materialsCheckList.allMaterialsAvailable
-                            title: "⚠ Действия"
+                            title: "Проверка материалов"
 
                             ColumnLayout {
                                 anchors.fill: parent
                                 spacing: 5
 
                                 Label {
-                                    text: "Недостаточно материалов для завершения производства"
+                                    text: "Не хватает материалов для завершения станка."
                                     font.bold: true
                                     color: "#d9534f"
                                 }
 
                                 Label {
-                                    text: "Пополните склад недостающими материалами на странице 'Склад'"
-                                    wrapMode: Text.WordWrap
+                                    text: "При завершении станка эти материалы будут возвращены на склад."
                                     Layout.fillWidth: true
                                     color: "#666"
                                 }
@@ -335,7 +363,7 @@ Page {
                 }
             }
 
-            // ДИАЛОГ ВНУТРИ ITEM
+            // Р вЂќР ВР С’Р вЂєР С›Р вЂњ Р вЂ™Р СњР Р€Р СћР В Р В ITEM
             Dialog {
                 id: completeDialog
                 title: "Завершение производства"
@@ -344,7 +372,7 @@ Page {
                 height: 200
                 ColumnLayout {
                     anchors.fill: parent
-                    Label { text: "Инвентарный номер (необязательно):" }
+                    Label { text: "Инвентарный номер (обязательно):" }
                     TextField { id: invNumberField; Layout.fillWidth: true }
                 }
                 onAccepted: {
@@ -354,6 +382,45 @@ Page {
                     inProgressModel.refresh()
                     materialsCheckModel.clear()
                     invNumberField.clear()
+                }
+            }
+
+
+
+            Dialog {
+                id: cancelProductionDialog
+                title: "Отменить производство"
+                standardButtons: Dialog.Yes | Dialog.No
+                width: 460
+                height: 240
+
+                ColumnLayout {
+                    anchors.fill: parent
+                    spacing: 12
+
+                    Label {
+                        text: "Отменить производство выбранного станка?"
+                        font.bold: true
+                        font.pixelSize: 16
+                        Layout.fillWidth: true
+                        wrapMode: Text.WordWrap
+                    }
+
+                    Label {
+                        text: "Запись будет удалена из списка «В процессе». Материалы не возвращаются на склад, потому что они списываются только при завершении производства."
+                        Layout.fillWidth: true
+                        wrapMode: Text.WordWrap
+                        color: "#666"
+                    }
+                }
+
+                onAccepted: {
+                    if (backend.cancelProduction(tab1Root.selectedInProgressId)) {
+                        tab1Root.selectedRow = -1
+                        tab1Root.selectedInProgressId = -1
+                        inProgressModel.refresh()
+                        materialsCheckModel.clear()
+                    }
                 }
             }
 
@@ -383,7 +450,7 @@ Page {
                 currentIndex: finishedTabBar.currentIndex
 
 
-                // ========== ПОДВКЛАДКА: НА СКЛАДЕ ==========
+                // ========== Р СџР С›Р вЂќР вЂ™Р С™Р вЂєР С’Р вЂќР С™Р С’: Р СњР С’ Р РЋР С™Р вЂєР С’Р вЂќР вЂў ==========
                 Item {
                     ColumnLayout {
                         anchors.fill: parent
@@ -419,7 +486,7 @@ Page {
                                 width: inStockSearchField.width + 200
                                 spacing: 0
 
-                                // Заголовок таблицы
+                                // Р вЂ”Р В°Р С–Р С•Р В»Р С•Р Р†Р С•Р С” РЎвЂљР В°Р В±Р В»Р С‘РЎвЂ РЎвЂ№
                                 Rectangle {
                                     Layout.fillWidth: true
                                     height: 35
@@ -430,9 +497,9 @@ Page {
                                         anchors.fill: parent
                                         spacing: 0
                                         Repeater {
-                                            model: ["ID", "Модель", "Инв. №", "Дата", "Материалы", "Работа", "Себестоимость", "Косвенные"]
+                                            model: ["#", "Модель", "Инв. №", "Дата начала", "Дата окончания", "Материалы", "Работа", "Стоимость", "Косвенные"]
                                             Rectangle {
-                                                width: index === 0 ? 50 : index === 1 ? 200 : index === 2 ? 100 : index === 3 ? 110 : index === 4 ? 120 : index === 5 ? 120 : index === 6 ? 140 : 130
+                                                width: index === 0 ? 50 : index === 1 ? 200 : index === 2 ? 100 : index === 3 ? 110 : index === 4 ? 120 : index === 5 ? 120 : index === 6 ? 120 : index === 7 ? 140 : 130
                                                 height: 35
                                                 border.width: 0
                                                 color: "transparent"
@@ -447,7 +514,7 @@ Page {
                                     }
                                 }
 
-                                // Данные
+                                // Р вЂќР В°Р Р…Р Р…РЎвЂ№Р Вµ
                                 Repeater {
                                     model: finishedModel
                                     
@@ -478,7 +545,7 @@ Page {
                                                 }
                                             }
 
-                                            // Модель
+                                            // Р СљР С•Р Т‘Р ВµР В»РЎРЉ
                                             Rectangle {
                                                 width: 200
                                                 height: 40
@@ -492,21 +559,33 @@ Page {
                                                 }
                                             }
 
-                                            // Инв. №
+                                            // Р ВР Р…Р Р†. РІвЂћвЂ“
                                             Rectangle {
                                                 width: 100
                                                 height: 40
                                                 color: "transparent"
                                                 Text {
                                                     anchors.centerIn: parent
-                                                    text: rowData.inv_num || "—"
+                                                    text: rowData.inv_num || "-"
                                                     font.pixelSize: 14
                                                 }
                                             }
 
-                                            // Дата
+                                            // Дата начала производства
                                             Rectangle {
                                                 width: 110
+                                                height: 40
+                                                color: "transparent"
+                                                Text {
+                                                    anchors.centerIn: parent
+                                                    text: rowData.start_date || "-"
+                                                    font.pixelSize: 14
+                                                }
+                                            }
+
+                                            // Р вЂќР В°РЎвЂљР В°
+                                            Rectangle {
+                                                width: 120
                                                 height: 40
                                                 color: "transparent"
                                                 Text {
@@ -516,40 +595,40 @@ Page {
                                                 }
                                             }
 
-                                            // Материалы
+                                            // Р СљР В°РЎвЂљР ВµРЎР‚Р С‘Р В°Р В»РЎвЂ№
                                             Rectangle {
                                                 width: 120
                                                 height: 40
                                                 color: "transparent"
                                                 Text {
                                                     anchors.centerIn: parent
-                                                    text: rowData.materials_cost ? rowData.materials_cost.toFixed(2) + " ₽" : "—"
+                                                    text: rowData.materials_cost ? rowData.materials_cost.toFixed(2) + " руб." : "-"
                                                     font.pixelSize: 14
                                                     color: "#666"
                                                 }
                                             }
 
-                                            // Работа
+                                            // Р В Р В°Р В±Р С•РЎвЂљР В°
                                             Rectangle {
                                                 width: 120
                                                 height: 40
                                                 color: "transparent"
                                                 Text {
                                                     anchors.centerIn: parent
-                                                    text: rowData.labor_cost ? rowData.labor_cost.toFixed(2) + " ₽" : "—"
+                                                    text: rowData.labor_cost ? rowData.labor_cost.toFixed(2) + " руб." : "-"
                                                     font.pixelSize: 14
                                                     color: "#666"
                                                 }
                                             }
 
-                                            // Себестоимость
+                                            // Р РЋР ВµР В±Р ВµРЎРѓРЎвЂљР С•Р С‘Р СР С•РЎРѓРЎвЂљРЎРЉ
                                             Rectangle {
                                                 width: 140
                                                 height: 40
                                                 color: "transparent"
                                                 Text {
                                                     anchors.centerIn: parent
-                                                    text: rowData.cost ? rowData.cost.toFixed(2) + " ₽" : "—"
+                                                    text: (rowData.cost !== undefined && rowData.cost !== null) ? Number(rowData.cost).toFixed(2) + " руб. (" + Number(rowData.base_cost || 0).toFixed(2) + " руб.)" : "-"
                                                     font.pixelSize: 14
                                                     font.bold: true
                                                     color: "#2c5aa0"
@@ -561,7 +640,7 @@ Page {
                                                 color: "transparent"
                                                 Text {
                                                     anchors.centerIn: parent
-                                                    text: rowData.indirect_cost ? rowData.indirect_cost.toFixed(2) + " ₽" : "0.00"
+                                                    text: rowData.indirect_cost !== undefined ? Number(rowData.indirect_cost).toFixed(2) + " руб." : "0.00"
                                                     font.pixelSize: 14
                                                     color: "#6b4f00"
                                                 }
@@ -585,21 +664,26 @@ Page {
                             spacing: 5
                             
                             Button {
-                                text: "Продать"
+                                text: "Sell"
                                 enabled: tab2Root.selectedFinishedId > 0
                                 highlighted: tab2Root.selectedFinishedId > 0
                                 onClicked: sellDialog.open()
                             }
 
                             Button {
-                                text: "Edit"
+                                text: "Изменить"
                                 enabled: tab2Root.selectedFinishedId > 0
                                 highlighted: tab2Root.selectedFinishedId > 0
                                 onClicked: {
                                     if (tab2Root.selectedRow >= 0) {
                                         var item = finishedModel.get(tab2Root.selectedRow)
+                                        editFinishedModelField.text = item.model || ""
+                                        editFinishedInvField.text = item.inv_num || ""
+                                        editFinishedStartDateField.text = item.start_date || ""
                                         editFinishedDateField.text = item.produced_date || ""
+                                        editFinishedCostField.text = (item.cost !== undefined ? Number(item.cost).toFixed(2) : "0.00")
                                         editFinishedIndirectField.text = (item.indirect_cost !== undefined ? Number(item.indirect_cost).toFixed(2) : "0.00")
+                                        editFinishedNotesField.text = item.notes || ""
                                         editFinishedDialog.open()
                                     }
                                 }
@@ -628,7 +712,7 @@ Page {
                     }
                 }
 
-                // ========== ПОДВКЛАДКА: ПРОДАННЫЕ ==========
+                // ========== Р СџР С›Р вЂќР вЂ™Р С™Р вЂєР С’Р вЂќР С™Р С’: Р СџР В Р С›Р вЂќР С’Р СњР СњР В«Р вЂў ==========
                 Item {
                     id: soldTab
                     property int selectedSoldId: -1
@@ -658,7 +742,7 @@ Page {
                             }
                         }
 
-                        // Заголовок таблицы
+                        // Р вЂ”Р В°Р С–Р С•Р В»Р С•Р Р†Р С•Р С” РЎвЂљР В°Р В±Р В»Р С‘РЎвЂ РЎвЂ№
                         Rectangle {
                             Layout.fillWidth: true
                             height: 30
@@ -667,9 +751,9 @@ Page {
                                 anchors.fill: parent
                                 spacing: 0
                                 Repeater {
-                                    model: ["ID", "Модель", "Инв. №", "Дата продажи", "Покупатель", "Цена продажи", "Прибыль"]
+                                    model: ["#", "Модель", "Инв. №", "Дата начала", "Дата продажи", "Дней", "Покупатель", "Цена продажи", "Прибыль"]
                                     Rectangle {
-                                        width: index === 0 ? 50 : index === 1 ? 150 : index === 2 ? 100 : index === 3 ? 120 : index === 4 ? 150 : index === 5 ? 120 : 100
+                                        width: index === 0 ? 50 : index === 1 ? 150 : index === 2 ? 100 : index === 3 ? 110 : index === 4 ? 120 : index === 5 ? 70 : index === 6 ? 150 : index === 7 ? 120 : 100
                                         height: 30
                                         border.color: "#ccc"
                                         color: "transparent"
@@ -724,35 +808,49 @@ Page {
                                         }
                                         Text {
                                             Layout.preferredWidth: 100
-                                            text: model.inv_num || "—"
+                                            text: model.inv_num || "-"
+                                            horizontalAlignment: Text.AlignHCenter
+                                            verticalAlignment: Text.AlignVCenter
+                                            font.pixelSize: 14
+                                        }
+                                        Text {
+                                            Layout.preferredWidth: 110
+                                            text: model.start_date || "-"
                                             horizontalAlignment: Text.AlignHCenter
                                             verticalAlignment: Text.AlignVCenter
                                             font.pixelSize: 14
                                         }
                                         Text {
                                             Layout.preferredWidth: 120
-                                            text: model.sale_date || "—"
+                                            text: model.sale_date || "-"
+                                            horizontalAlignment: Text.AlignHCenter
+                                            verticalAlignment: Text.AlignVCenter
+                                            font.pixelSize: 14
+                                        }
+                                        Text {
+                                            Layout.preferredWidth: 70
+                                            text: model.days_to_sale !== undefined && model.days_to_sale !== null ? model.days_to_sale : "-"
                                             horizontalAlignment: Text.AlignHCenter
                                             verticalAlignment: Text.AlignVCenter
                                             font.pixelSize: 14
                                         }
                                         Text {
                                             Layout.preferredWidth: 150
-                                            text: model.buyer || "—"
+                                            text: model.buyer || "-"
                                             horizontalAlignment: Text.AlignHCenter
                                             verticalAlignment: Text.AlignVCenter
                                             font.pixelSize: 14
                                         }
                                         Text {
                                             Layout.preferredWidth: 120
-                                            text: model.sale_price ? model.sale_price.toFixed(2) + " ₽" : "—"
+                                            text: model.sale_price ? model.sale_price.toFixed(2) + " руб." : "-"
                                             horizontalAlignment: Text.AlignHCenter
                                             verticalAlignment: Text.AlignVCenter
                                             font.pixelSize: 14
                                         }
                                         Text {
                                             Layout.preferredWidth: 100
-                                            text: model.profit ? model.profit.toFixed(2) + " ₽" : "—"
+                                            text: model.profit ? model.profit.toFixed(2) + " руб." : "-"
                                             horizontalAlignment: Text.AlignHCenter
                                             verticalAlignment: Text.AlignVCenter
                                             font.pixelSize: 14
@@ -779,7 +877,11 @@ Page {
                                             "id": item.id !== undefined ? item.id : -1,
                                             "machine_model": item.machine_model !== undefined ? item.machine_model : "",
                                             "inv_num": item.inv_num !== undefined ? item.inv_num : "",
+                                            "produced_date": item.produced_date !== undefined ? item.produced_date : "",
+                                            "start_date": item.start_date !== undefined ? item.start_date : "",
+                                            "indirect_cost": item.indirect_cost !== undefined ? item.indirect_cost : 0,
                                             "sale_date": item.sale_date !== undefined ? item.sale_date : "",
+                                            "days_to_sale": item.days_to_sale !== undefined ? item.days_to_sale : null,
                                             "buyer": item.buyer !== undefined ? item.buyer : "",
                                             "sale_price": item.sale_price !== undefined ? item.sale_price : 0,
                                             "profit": item.profit !== undefined ? item.profit : 0
@@ -793,13 +895,29 @@ Page {
 
                         Label {
                             visible: soldListModel.count === 0
-                            text: "Нет проданных станков"
+                            text: "Проданных станков нет"
                             color: "#666"
                         }
 
-                        // КНОПКА ВОЗВРАТА
+                        // Р С™Р СњР С›Р СџР С™Р С’ Р вЂ™Р С›Р вЂ”Р вЂ™Р В Р С’Р СћР С’
                         RowLayout {
                             Layout.fillWidth: true
+                            Button {
+                                text: "Изменить"
+                                enabled: soldTab.selectedSoldId > 0
+                                highlighted: soldTab.selectedSoldId > 0
+                                onClicked: {
+                                    if (soldTab.selectedSoldRow >= 0) {
+                                        var row = soldListModel.get(soldTab.selectedSoldRow)
+                                        soldEditInvField.text = row.inv_num || ""
+                                        soldEditBuyerField.text = row.buyer || ""
+                                        soldEditSaleDateField.text = row.sale_date || ""
+                                        soldEditProducedDateField.text = row.produced_date || ""
+                                        soldEditIndirectField.text = row.indirect_cost !== undefined ? Number(row.indirect_cost).toFixed(2) : "0.00"
+                                        editSoldDialog.open()
+                                    }
+                                }
+                            }
                             Button {
                                 text: "Вернуть на склад"
                                 enabled: soldTab.selectedSoldId > 0
@@ -809,19 +927,58 @@ Page {
                         }
                     }
 
-                    // ДИАЛОГ ПОДТВЕРЖДЕНИЯ ВОЗВРАТА
+                    // Р вЂќР ВР С’Р вЂєР С›Р вЂњ Р СџР С›Р вЂќР СћР вЂ™Р вЂўР В Р вЂ“Р вЂќР вЂўР СњР ВР Р‡ Р вЂ™Р С›Р вЂ”Р вЂ™Р В Р С’Р СћР С’
+                    Dialog {
+                        id: editSoldDialog
+                        title: "Изменить проданный станок"
+                        standardButtons: Dialog.Ok | Dialog.Cancel
+                        width: 480
+                        height: 320
+
+                        ColumnLayout {
+                            anchors.fill: parent
+                            spacing: 8
+                            Label { text: "Инвентарный номер:" }
+                            TextField { id: soldEditInvField; Layout.fillWidth: true }
+                            Label { text: "Покупатель:" }
+                            TextField { id: soldEditBuyerField; Layout.fillWidth: true }
+                            Label { text: "Дата продажи (ГГГГ-ММ-ДД):" }
+                            TextField { id: soldEditSaleDateField; Layout.fillWidth: true }
+                            Label { text: "Production end date (YYYY-MM-DD):" }
+                            TextField { id: soldEditProducedDateField; Layout.fillWidth: true }
+                            Label { text: "Indirect expenses:" }
+                            TextField { id: soldEditIndirectField; Layout.fillWidth: true; validator: DoubleValidator { bottom: 0 } }
+                        }
+
+                        onAccepted: {
+                            if (soldTab.selectedSoldId > 0) {
+                                if (backend.updateSoldMachine(
+                                    soldTab.selectedSoldId,
+                                    soldEditInvField.text,
+                                    soldEditBuyerField.text,
+                                    soldEditSaleDateField.text,
+                                    soldEditProducedDateField.text,
+                                    parseFloat(soldEditIndirectField.text || "0")
+                                )) {
+                                    soldListView.loadSoldMachines()
+                                    finishedModel.refresh()
+                                }
+                            }
+                        }
+                    }
+
                     Dialog {
                         id: returnToStockDialog
-                        title: "Возврат станка на склад"
+                        title: "Вернуть станок на склад"
                         standardButtons: Dialog.Yes | Dialog.No
                         width: 450
                         height: 180
 
                         Label {
                             text: "Вернуть проданный станок на склад?\n\n" +
-                                "• Станок получит статус 'На складе'\n" +
-                                "• Запись о продаже будет удалена\n" +
-                                "• Информация о покупателе и дате продажи будет очищена"
+                                "- Станок получит статус 'На складе'\n" +
+                                "- Запись о продаже будет удалена\n" +
+                                "- Покупатель и дата продажи будут очищены"
                             wrapMode: Text.WordWrap
                             anchors.fill: parent
                             anchors.margins: 10
@@ -852,7 +1009,11 @@ Page {
                                 "id": item.id !== undefined ? item.id : -1,
                                 "machine_model": item.machine_model !== undefined ? item.machine_model : "",
                                 "inv_num": item.inv_num !== undefined ? item.inv_num : "",
+                                "produced_date": item.produced_date !== undefined ? item.produced_date : "",
+                                "start_date": item.start_date !== undefined ? item.start_date : "",
+                                "indirect_cost": item.indirect_cost !== undefined ? item.indirect_cost : 0,
                                 "sale_date": item.sale_date !== undefined ? item.sale_date : "",
+                                "days_to_sale": item.days_to_sale !== undefined ? item.days_to_sale : null,
                                 "buyer": item.buyer !== undefined ? item.buyer : "",
                                 "sale_price": item.sale_price !== undefined ? item.sale_price : 0,
                                 "profit": item.profit !== undefined ? item.profit : 0
@@ -862,10 +1023,10 @@ Page {
                 }
             }
         
-                    // ========== ДИАЛОГИ ==========
+                    // ========== Р вЂќР ВР С’Р вЂєР С›Р вЂњР В ==========
             Dialog {
                 id: sellDialog
-                title: "Продажа станка"
+                title: "Sell machine"
                 standardButtons: Dialog.Ok | Dialog.Cancel
                 width: 550
                 height: 520
@@ -880,14 +1041,14 @@ Page {
                     TextField {
                         id: sellInvNumberField
                         Layout.fillWidth: true
-                        placeholderText: "Введите или оставьте пустым"
+                        placeholderText: "Enter inventory number or leave empty"
                     }
 
                     Label { text: "Дата продажи:" }
                     TextField {
                         id: sellDateField
                         Layout.fillWidth: true
-                        placeholderText: "ГГГГ-ММ-ДД (Enter = сегодня)"
+                        placeholderText: "YYYY-MM-DD (Enter = today)"
                         text: Qt.formatDate(new Date(), "yyyy-MM-dd")
                     }
 
@@ -895,21 +1056,21 @@ Page {
                     TextField {
                         id: buyerField
                         Layout.fillWidth: true
-                        placeholderText: "ФИО или название организации"
+                        placeholderText: "Имя покупателя или компания"
                     }
 
-                    Label { text: "Цена продажи (руб):" }
+                    Label { text: "Цена продажи (руб.):" }
                     TextField {
                         id: sellPriceField
                         Layout.fillWidth: true
                         validator: DoubleValidator { bottom: 0.01 }
-                        placeholderText: "Введите цену"
+                        placeholderText: "Enter sale price"
                     }
 
-                    // БЛОК ТРАНСПОРТИРОВКИ
+                    // Р вЂР вЂєР С›Р С™ Р СћР В Р С’Р СњР РЋР СџР С›Р В Р СћР ВР В Р С›Р вЂ™Р С™Р В
                     GroupBox {
                         Layout.fillWidth: true
-                        title: "Транспортировка"
+                        title: "Shipping"
 
                         ColumnLayout {
                             anchors.fill: parent
@@ -919,14 +1080,14 @@ Page {
 
                             RadioButton {
                                 id: shippingFreeRadio
-                                text: "Бесплатная (клиент оплачивает)"
+                                text: "Бесплатная доставка (включена в стоимость)"
                                 checked: true
                                 ButtonGroup.group: shippingGroup
                             }
 
                             RadioButton {
                                 id: shippingPaidRadio
-                                text: "Платная (добавить к себестоимости)"
+                                text: "Платная доставка (добавляется как косвенный расход)"
                                 ButtonGroup.group: shippingGroup
                             }
 
@@ -934,7 +1095,7 @@ Page {
                                 visible: shippingPaidRadio.checked
                                 Layout.fillWidth: true
                                 
-                                Label { text: "Стоимость доставки (руб):" }
+                                Label { text: "Shipping cost (rub.):" }
                                 TextField {
                                     id: shippingCostField
                                     Layout.fillWidth: true
@@ -946,7 +1107,7 @@ Page {
 
                             Label {
                                 visible: shippingPaidRadio.checked
-                                text: "⚠ Стоимость доставки будет добавлена к себестоимости станка"
+                                text: "Все расходы на доставку будут добавлены к стоимости станка и сумме продажи."
                                 font.pixelSize: 11
                                 color: "#666"
                                 wrapMode: Text.WordWrap
@@ -959,7 +1120,7 @@ Page {
                         id: sellErrorLabel
                         color: "red"
                         visible: false
-                        text: "Заполните покупателя и цену"
+                        text: "Enter sale price and buyer."
                     }
                 }
 
@@ -1002,7 +1163,7 @@ Page {
 
             Dialog {
                 id: costDetailsDialog
-                title: "Детали себестоимости станка"
+                title: "Детали себестоимости"
                 standardButtons: Dialog.Close
                 width: 600
                 height: 500
@@ -1025,11 +1186,12 @@ Page {
 
                         TextArea {
                             id: costDetailsText
+                            width: parent.availableWidth
                             readOnly: true
                             wrapMode: TextArea.Wrap
                             font.family: "Courier New"
                             font.pixelSize: 12
-                            text: "Загрузка данных..."
+                            text: "Загрузка деталей себестоимости..."
                         }
                     }
                 }
@@ -1041,10 +1203,10 @@ Page {
                 }
             }
 
-            // ДИАЛОГ РАЗБОРКИ СТАНКА
+            // Р вЂќР ВР С’Р вЂєР С›Р вЂњ Р В Р С’Р вЂ”Р вЂР С›Р В Р С™Р В Р РЋР СћР С’Р СњР С™Р С’
             Dialog {
                 id: disassembleDialog
-                title: "Разборка станка"
+                title: "Разобрать станок"
                 standardButtons: Dialog.Yes | Dialog.No
                 width: 550
                 height: 400
@@ -1066,7 +1228,7 @@ Page {
                     }
 
                     Label {
-                        text: "Что произойдёт:"
+                        text: "What will happen:"
                         font.bold: true
                     }
 
@@ -1077,6 +1239,7 @@ Page {
 
                         TextArea {
                             id: disassemblePreviewText
+                            width: parent.availableWidth
                             readOnly: true
                             wrapMode: TextArea.Wrap
                             font.family: "Courier New"
@@ -1092,7 +1255,7 @@ Page {
                     }
 
                     Label {
-                        text: "⚠ Это действие НЕЛЬЗЯ отменить!"
+                        text: "Внимание: это действие нельзя отменить!"
                         color: "#d9534f"
                         font.bold: true
                     }
@@ -1114,26 +1277,48 @@ Page {
 
             Dialog {
                 id: editFinishedDialog
-                title: "Edit finished machine"
+                title: "Изменить готовый станок"
                 standardButtons: Dialog.Ok | Dialog.Cancel
-                width: 420
-                height: 230
+                width: 520
+                height: 520
 
                 ColumnLayout {
                     anchors.fill: parent
-                    spacing: 10
-                    Label { text: "Production end date (YYYY-MM-DD):" }
+                    spacing: 8
+
+                    Label { text: "Модель:" }
+                    TextField { id: editFinishedModelField; Layout.fillWidth: true }
+
+                    Label { text: "Инвентарный номер:" }
+                    TextField { id: editFinishedInvField; Layout.fillWidth: true }
+
+                    Label { text: "Дата начала производства (ГГГГ-ММ-ДД):" }
+                    TextField { id: editFinishedStartDateField; Layout.fillWidth: true; placeholderText: "2026-04-01" }
+
+                    Label { text: "Дата окончания производства (ГГГГ-ММ-ДД):" }
                     TextField { id: editFinishedDateField; Layout.fillWidth: true; placeholderText: "2026-04-28" }
-                    Label { text: "Indirect costs:" }
+
+                    Label { text: "Себестоимость:" }
+                    TextField { id: editFinishedCostField; Layout.fillWidth: true; validator: DoubleValidator { bottom: 0 } }
+
+                    Label { text: "Косвенные расходы:" }
                     TextField { id: editFinishedIndirectField; Layout.fillWidth: true; validator: DoubleValidator { bottom: 0 } }
+
+                    Label { text: "Примечание:" }
+                    TextField { id: editFinishedNotesField; Layout.fillWidth: true }
                 }
 
                 onAccepted: {
-                    if (tab2Root.selectedFinishedId > 0 && editFinishedDateField.text && editFinishedIndirectField.text) {
+                    if (tab2Root.selectedFinishedId > 0 && editFinishedModelField.text && editFinishedDateField.text && editFinishedStartDateField.text && editFinishedCostField.text && editFinishedIndirectField.text) {
                         if (backend.updateFinishedGood(
                             tab2Root.selectedFinishedId,
+                            editFinishedModelField.text,
+                            editFinishedInvField.text,
+                            editFinishedStartDateField.text,
                             editFinishedDateField.text,
-                            parseFloat(editFinishedIndirectField.text)
+                            parseFloat(editFinishedCostField.text),
+                            parseFloat(editFinishedIndirectField.text),
+                            editFinishedNotesField.text
                         )) {
                             finishedModel.refresh()
                         }
@@ -1141,10 +1326,10 @@ Page {
                 }
             }
 
-            // ДИАЛОГ УДАЛЕНИЯ СТАНКА
+            // Р вЂќР ВР С’Р вЂєР С›Р вЂњ Р Р€Р вЂќР С’Р вЂєР вЂўР СњР ВР Р‡ Р РЋР СћР С’Р СњР С™Р С’
             Dialog {
                 id: deleteMachineDialog
-                title: "Удаление станка"
+                title: "Удалить станок"
                 standardButtons: Dialog.Yes | Dialog.No
                 width: 500
                 height: 250
@@ -1166,22 +1351,17 @@ Page {
                     }
 
                     Label {
-                        text: "• Станок будет удалён из базы данных\n" +
-                            "• Материалы НЕ вернутся на склад\n" +
-                            "• История работы по станку будет удалена\n" +
-                            "• Это действие НЕЛЬЗЯ отменить"
+                        text: "This machine will be removed from the database.\n" +
+                            "Материалы не будут возвращены на склад.\n" +
+                            "Production history will be deleted\n" +
+                                "This action cannot be undone"
                         wrapMode: Text.WordWrap
                         Layout.fillWidth: true
                     }
 
-                    Rectangle {
-                        Layout.fillWidth: true
-                        height: 1
-                        color: "#ccc"
-                    }
 
                     Label {
-                        text: "⚠ Если вы хотите вернуть материалы на склад, используйте 'Разобрать станок'"
+                        text: "If you want to keep the materials, use disassemble instead of delete."
                         color: "#d9534f"
                         font.bold: true
                         wrapMode: Text.WordWrap
@@ -1203,12 +1383,12 @@ Page {
             }
         }
         
-        // ================= ВКЛАДКА 3: РЕДАКТОР МОДЕЛЕЙ =================
+        // ================= Р вЂ™Р С™Р вЂєР С’Р вЂќР С™Р С’ 3: Р В Р вЂўР вЂќР С’Р С™Р СћР С›Р В  Р СљР С›Р вЂќР вЂўР вЂєР вЂўР в„ў =================
         Item {
             id: tab3Root
             property int selectedMachineId: -1
             property string selectedMachineModel: ""
-            property int selectedSpecRow: -1   // своё свойство для отслеживания строки в спецификации
+            property int selectedSpecRow: -1   // РЎРѓР Р†Р С•РЎвЂ РЎРѓР Р†Р С•Р в„–РЎРѓРЎвЂљР Р†Р С• Р Т‘Р В»РЎРЏ Р С•РЎвЂљРЎРѓР В»Р ВµР В¶Р С‘Р Р†Р В°Р Р…Р С‘РЎРЏ РЎРѓРЎвЂљРЎР‚Р С•Р С”Р С‘ Р Р† РЎРѓР С—Р ВµРЎвЂ Р С‘РЎвЂћР С‘Р С”Р В°РЎвЂ Р С‘Р С‘
 
             MachineListModel { id: machineModel }
             MachineSpecModel { id: specModel }
@@ -1218,7 +1398,7 @@ Page {
                 anchors.margins: 10
                 spacing: 10
 
-                // Левая часть — список моделей
+                // Р вЂєР ВµР Р†Р В°РЎРЏ РЎвЂЎР В°РЎРѓРЎвЂљРЎРЉ РІР‚вЂќ РЎРѓР С—Р С‘РЎРѓР С•Р С” Р СР С•Р Т‘Р ВµР В»Р ВµР в„–
                 ColumnLayout {
                     Layout.preferredWidth: 300
                     Layout.fillHeight: true
@@ -1229,7 +1409,7 @@ Page {
                         TextField {
                             id: modelSearchField
                             Layout.fillWidth: true
-                            placeholderText: "Поиск модели..."
+                            placeholderText: "Поиск моделей..."
                             onTextChanged: machineModel.setFilter(text)
                         }
                         Button {
@@ -1238,14 +1418,14 @@ Page {
                                 modelSearchField.clear()
                                 machineModel.setFilter("")
                                 machineModel.refresh()
-                                modelCountText.text = "Найдено моделей: " + machineModel.rowCount()
+                                modelCountText.text = "Моделей станков: " + machineModel.rowCount()
                             }
                         }
                     }
 
                     Label {
                         id: modelCountText
-                        text: "Найдено моделей: 0"
+                        text: "Моделей станков: 0"
                     }
 
                     ListView {
@@ -1270,7 +1450,7 @@ Page {
                                     color: "black"
                                 }
                                 Text {
-                                    text: display.cost.toFixed(2) + " ₽"
+                                    text: display.cost.toFixed(2) + " руб."
                                     Layout.preferredWidth: 100
                                     horizontalAlignment: Text.AlignRight
                                     color: "black"
@@ -1286,7 +1466,7 @@ Page {
                                     tab3Root.selectedMachineModel = m.model
                                     specModel.setMachineId(m.id)
                                     specModel.refresh()
-                                    tab3Root.selectedSpecRow = -1  // сбрасываем выделение в спецификации
+                                    tab3Root.selectedSpecRow = -1  // РЎРѓР В±РЎР‚Р В°РЎРѓРЎвЂ№Р Р†Р В°Р ВµР С Р Р†РЎвЂ№Р Т‘Р ВµР В»Р ВµР Р…Р С‘Р Вµ Р Р† РЎРѓР С—Р ВµРЎвЂ Р С‘РЎвЂћР С‘Р С”Р В°РЎвЂ Р С‘Р С‘
                                 }
                             }
                         }
@@ -1315,18 +1495,18 @@ Page {
                     }
                 }
 
-                // Правая часть — спецификация
+                // Р СџРЎР‚Р В°Р Р†Р В°РЎРЏ РЎвЂЎР В°РЎРѓРЎвЂљРЎРЉ РІР‚вЂќ РЎРѓР С—Р ВµРЎвЂ Р С‘РЎвЂћР С‘Р С”Р В°РЎвЂ Р С‘РЎРЏ
                 ColumnLayout {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     spacing: 5
 
                     Label {
-                        text: tab3Root.selectedMachineId > 0 ? "Спецификация модели: " + tab3Root.selectedMachineModel : "Выберите модель"
+                        text: tab3Root.selectedMachineId > 0 ? "Спецификация станка: " + tab3Root.selectedMachineModel : "Выберите станок"
                         font.bold: true
                     }
 
-                    // Заголовок таблицы спецификации
+                    // Р вЂ”Р В°Р С–Р С•Р В»Р С•Р Р†Р С•Р С” РЎвЂљР В°Р В±Р В»Р С‘РЎвЂ РЎвЂ№ РЎРѓР С—Р ВµРЎвЂ Р С‘РЎвЂћР С‘Р С”Р В°РЎвЂ Р С‘Р С‘
                     Rectangle {
                         Layout.fillWidth: true
                         height: 30
@@ -1336,7 +1516,7 @@ Page {
                             anchors.fill: parent
                             spacing: 0
                             Repeater {
-                                model: ["ID", "Материал", "Кол-во", "Цена/ед", "Сумма"]
+                                model: ["#", "Материал", "Кол-во", "Цена/ед.", "Сумма"]
                                 Rectangle {
                                     width: index === 0 ? 50 : index === 1 ? 250 : index === 2 ? 80 : index === 3 ? 100 : 100
                                     height: 30
@@ -1392,7 +1572,7 @@ Page {
                         }
                     }
 
-                    // ИТОГОВАЯ СУММА
+                    // Р ВР СћР С›Р вЂњР С›Р вЂ™Р С’Р Р‡ Р РЋР Р€Р СљР СљР С’
                     Rectangle {
                         Layout.fillWidth: true
                         height: 35
@@ -1401,25 +1581,25 @@ Page {
                         visible: tab3Root.selectedMachineId > 0 && specModel.rowCount() > 0
                         
                         RowLayout {
-                            anchors.fill: parent
+                            Layout.fillWidth: true
                             anchors.margins: 5
-                            
+
                             Label {
-                                text: "ИТОГО:"
+                                text: "Итого:"
                                 font.bold: true
                                 font.pixelSize: 14
                                 Layout.fillWidth: true
                             }
-                            
+
                             Label {
                                 id: totalCostLabel
-                                text: calculateTotalCost() + " ₽"
+                                text: calculateTotalCost() + " руб."
                                 font.bold: true
                                 font.pixelSize: 14
                                 color: "#2c5aa0"
                                 horizontalAlignment: Text.AlignRight
                                 Layout.preferredWidth: 100
-                                
+
                                 function calculateTotalCost() {
                                     var total = 0.0
                                     for (var i = 0; i < specModel.rowCount(); i++) {
@@ -1431,33 +1611,31 @@ Page {
                                     }
                                     return total.toFixed(2)
                                 }
-                                
+
                                 Connections {
                                     target: specModel
                                     function onModelReset() {
-                                        totalCostLabel.text = totalCostLabel.calculateTotalCost() + " ₽"
+                                        totalCostLabel.text = totalCostLabel.calculateTotalCost() + " руб."
                                     }
                                 }
                             }
                         }
-                    }
 
                     Label {
                         visible: tab3Root.selectedMachineId > 0 && specModel.rowCount() === 0
-                        text: "Спецификация пуста. Добавьте материалы."
+                        text: "Материалы ещё не добавлены. Добавьте материалы в спецификацию станка."
                         color: "#666"
                     }
 
                     RowLayout {
                         Layout.fillWidth: true
-                        visible: tab3Root.selectedMachineId > 0
                         spacing: 5
-                        
+
                         Button {
                             text: "Добавить материал"
                             onClicked: addMaterialToSpecDialog.open()
                         }
-                        
+
                         Button {
                             text: "Изменить количество"
                             enabled: tab3Root.selectedSpecRow >= 0
@@ -1472,7 +1650,7 @@ Page {
                                 }
                             }
                         }
-                        
+
                         Button {
                             text: "Удалить материал"
                             enabled: tab3Root.selectedSpecRow >= 0
@@ -1485,7 +1663,7 @@ Page {
                                         tab3Root.selectedSpecRow = -1
                                         specModel.refresh()
                                         machineModel.refresh()
-                                        modelCountText.text = "Найдено моделей: " + machineModel.rowCount()
+                                        modelCountText.text = "Моделей станков: " + machineModel.rowCount()
                                     }
                                 }
                             }
@@ -1493,8 +1671,6 @@ Page {
                     }
                 }
             }
-
-            // ДИАЛОГИ (без изменений)
             Dialog {
                 id: addModelDialog
                 title: "Добавить модель станка"
@@ -1510,7 +1686,7 @@ Page {
                     if (newModelName.text) {
                         backend.addMachineModel(newModelName.text)
                         machineModel.refresh()
-                        modelCountText.text = "Найдено моделей: " + machineModel.rowCount()
+                        modelCountText.text = "Моделей станков: " + machineModel.rowCount()
                         newModelName.clear()
                     }
                 }
@@ -1518,12 +1694,12 @@ Page {
 
             Dialog {
                 id: deleteModelDialog
-                title: "Удаление модели станка"
+                title: "Удалить модель станка"
                 standardButtons: Dialog.Yes | Dialog.No
                 width: 400
                 height: 150
                 Label {
-                    text: "Удалить модель \"" + tab3Root.selectedMachineModel + "\"?\n\nЭто удалит спецификацию, но не затронет готовые станки."
+                    text: "Удалить модель станка \"" + tab3Root.selectedMachineModel + "\"?\n\nБудет удалена модель и вся связанная спецификация."
                     wrapMode: Text.WordWrap
                     anchors.fill: parent
                     anchors.margins: 10
@@ -1535,14 +1711,14 @@ Page {
                         specModel.setMachineId(-1)
                         specModel.refresh()
                         machineModel.refresh()
-                        modelCountText.text = "Найдено моделей: " + machineModel.rowCount()
+                        modelCountText.text = "Моделей станков: " + machineModel.rowCount()
                     }
                 }
             }
 
             Dialog {
                 id: startProductionDialog
-                title: "Начать производство станка"
+                title: "Начать производство"
                 standardButtons: Dialog.Ok | Dialog.Cancel
                 width: 500
                 height: 250
@@ -1551,11 +1727,11 @@ Page {
                     spacing: 10
 
                     Label {
-                        text: "Модель: " + tab3Root.selectedMachineModel
+                        text: "Станок: " + tab3Root.selectedMachineModel
                         font.bold: true
                     }
 
-                    Label { text: "Количество станков:" }
+                    Label { text: "Количество к производству:" }
                     SpinBox {
                         id: quantitySpinBox
                         Layout.fillWidth: true
@@ -1564,15 +1740,15 @@ Page {
                         value: 1
                     }
 
-                    Label { text: "Примечание (необязательно):" }
+                    Label { text: "Примечание к производству (необязательно):" }
                     TextField {
                         id: productionNotesField
                         Layout.fillWidth: true
-                        placeholderText: "Серийный номер, комментарий..."
+                        placeholderText: "Например: заказ клиента, срочный заказ..."
                     }
 
                     Label {
-                        text: "Станки будут добавлены в активный пул со статусом 'В процессе'."
+                        text: "Это примечание будет сохранено в записи производства."
                         wrapMode: Text.WordWrap
                         color: "#666"
                         font.pixelSize: 11
@@ -1614,7 +1790,7 @@ Page {
                         backend.addMaterialToMachine(tab3Root.selectedMachineId, materialComboSpec.currentValue, parseFloat(specQty.text))
                         specModel.refresh()
                         machineModel.refresh()
-                        modelCountText.text = "Найдено моделей: " + machineModel.rowCount()
+                        modelCountText.text = "Моделей станков: " + machineModel.rowCount()
                         specQty.clear()
                     }
                 }
@@ -1643,19 +1819,16 @@ Page {
                         backend.updateMaterialInMachine(tab3Root.selectedMachineId, materialId, parseFloat(newQtyField.text))
                         specModel.refresh()
                         machineModel.refresh()
-                        modelCountText.text = "Найдено моделей: " + machineModel.rowCount()
+                        modelCountText.text = "Моделей станков: " + machineModel.rowCount()
                     }
                 }
             }
 
             Component.onCompleted: {
                 machineModel.refresh()
-                modelCountText.text = "Найдено моделей: " + machineModel.rowCount()
+                modelCountText.text = "Моделей станков: " + machineModel.rowCount()
             }
         }
     }
 }
-
-
-
-
+}

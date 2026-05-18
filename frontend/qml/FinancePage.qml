@@ -98,6 +98,62 @@ Page {
             }
         }
 
+
+        GroupBox {
+            title: "Расчёт налогов"
+            Layout.fillWidth: true
+            Layout.preferredHeight: 215
+
+            ColumnLayout {
+                anchors.fill: parent
+                spacing: 8
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Label { text: "Период:" }
+                    TextField { id: taxStartField; Layout.preferredWidth: 120; placeholderText: "ГГГГ-ММ-ДД" }
+                    Label { text: "—" }
+                    TextField { id: taxEndField; Layout.preferredWidth: 120; placeholderText: "ГГГГ-ММ-ДД" }
+                    Label { text: "Ставка %:" }
+                    TextField { id: taxRateField; Layout.preferredWidth: 80; text: "6"; validator: DoubleValidator { bottom: 0 } }
+                    Button { text: "Рассчитать"; onClicked: updateTaxReport() }
+                    Button { text: "Отметить оплату"; onClicked: saveTaxPayment() }
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    color: "#f8faf7"
+                    border.color: "#d6dfd2"
+                    radius: 4
+
+                    GridLayout {
+                        anchors.fill: parent
+                        anchors.margins: 10
+                        columns: 4
+                        rowSpacing: 6
+                        columnSpacing: 12
+
+                        Label { text: "Доходы без налички:"; font.bold: true }
+                        Label { id: taxIncomeLabel; text: "0.00 руб." }
+                        Label { text: "Расходы без налички:"; font.bold: true }
+                        Label { id: taxExpenseLabel; text: "0.00 руб." }
+
+                        Label { text: "Налоговая база:"; font.bold: true }
+                        Label { id: taxBaseLabel; text: "0.00 руб." }
+                        Label { text: "Налог:"; font.bold: true }
+                        Label { id: taxAmountLabel; text: "0.00 руб."; color: "#9b2f2f"; font.bold: true }
+
+                        Label { text: "Исключено наличкой:"; font.bold: true }
+                        Label { id: taxCashExcludedLabel; text: "0.00 руб."; Layout.columnSpan: 3 }
+
+                        Label { text: "Последняя оплата:"; font.bold: true }
+                        Label { id: taxLastPaymentLabel; text: "Налог ещё не отмечался как уплаченный"; Layout.columnSpan: 3 }
+                    }
+                }
+            }
+        }
+
         GroupBox {
             title: "Косвенные расходы"
             Layout.fillWidth: true
@@ -129,6 +185,47 @@ Page {
                     Label { text: "—" }
                     TextField { id: indirectToField; Layout.preferredWidth: 120; placeholderText: "ГГГГ-ММ-ДД" }
                     Button { text: "Показать за период"; onClicked: reloadIndirect() }
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    height: 58
+                    color: "#fff7e6"
+                    border.color: "#e2c27a"
+                    radius: 4
+
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.margins: 10
+                        spacing: 18
+
+                        Label {
+                            text: "Простой по косвенным расходам"
+                            font.bold: true
+                            color: "#7a4b00"
+                        }
+
+                        Label {
+                            id: indirectIdleDaysLabel
+                            text: "Дней простоя: 0"
+                            font.bold: true
+                        }
+
+                        Label {
+                            id: indirectIdleAmountLabel
+                            text: "Набежало: 0.00 руб."
+                            font.bold: true
+                            color: "#9b2f2f"
+                        }
+
+                        Label {
+                            id: indirectIdlePeriodLabel
+                            Layout.fillWidth: true
+                            text: ""
+                            color: "#666"
+                            elide: Text.ElideRight
+                        }
+                    }
                 }
 
                 RowLayout {
@@ -252,6 +349,48 @@ Page {
         }
     }
 
+
+    function updateTaxReport() {
+        var result = backend.calculateTaxReport(taxStartField.text, taxEndField.text, parseFloat(taxRateField.text || "0"))
+        taxIncomeLabel.text = Number(result.income || 0).toFixed(2) + " руб."
+        taxExpenseLabel.text = Number(result.expense || 0).toFixed(2) + " руб."
+        taxBaseLabel.text = Number(result.base || 0).toFixed(2) + " руб."
+        taxAmountLabel.text = Number(result.tax || 0).toFixed(2) + " руб."
+        var excluded = Number(result.cash_income_excluded || 0) + Number(result.cash_expense_excluded || 0)
+        taxCashExcludedLabel.text = excluded.toFixed(2) + " руб. (операций: " + Number(result.cash_count || 0) + ")"
+        updateLastTaxPayment()
+    }
+
+    function updateLastTaxPayment() {
+        var payment = backend.getLastTaxPayment()
+        if (!payment.ok) {
+            taxLastPaymentLabel.text = payment.message || "Не удалось прочитать последнюю оплату"
+            return
+        }
+        if (!payment.has_payment) {
+            taxLastPaymentLabel.text = "Налог ещё не отмечался как уплаченный"
+            return
+        }
+        taxLastPaymentLabel.text = payment.payment_date + ": " +
+            Number(payment.amount || 0).toFixed(2) + " руб. за период " +
+            (payment.period_start || "") + " — " + (payment.period_end || "") +
+            " (" + Number(payment.rate || 0).toFixed(2) + "%)"
+    }
+
+    function saveTaxPayment() {
+        var result = backend.saveTaxPayment(
+            taxStartField.text,
+            taxEndField.text,
+            parseFloat((taxRateField.text || "0").replace(",", "."))
+        )
+        if (result.ok) {
+            updateTaxReport()
+            updateLastTaxPayment()
+        } else {
+            taxLastPaymentLabel.text = result.message || "Не удалось сохранить оплату налога"
+        }
+    }
+
     function updateDashboard() {
         totalAssetsLabel.text = backend.getTotalAssets() + " руб."
         var revenue = backend.getMonthlyRevenue(startDateField.text, endDateField.text)
@@ -293,6 +432,37 @@ Page {
                 "amount": a.amount !== undefined ? a.amount : 0
             })
         }
+
+        var idle = backend.getIndirectIdleSummary(indirectFromField.text, indirectToField.text)
+        if (idle.ok) {
+            indirectIdleDaysLabel.text = "Дней простоя: " + Number(idle.idle_days || 0)
+            indirectIdleAmountLabel.text = "Набежало: " + Number(idle.amount || 0).toFixed(2) + " руб."
+            indirectIdlePeriodLabel.text = "Период: " + (idle.date_from || "") + " — " + (idle.date_to || "") +
+                ", активных категорий: " + Number(idle.active_categories || 0)
+        } else {
+            indirectIdleDaysLabel.text = "Дней простоя: 0"
+            indirectIdleAmountLabel.text = "Набежало: 0.00 руб."
+            indirectIdlePeriodLabel.text = idle.message || "Не удалось рассчитать простой"
+        }
+    }
+
+    Timer {
+        id: indirectIdleNightlyTimer
+        interval: msToNextNightUpdate()
+        repeat: false
+        running: true
+        onTriggered: {
+            reloadIndirect()
+            interval = 24 * 60 * 60 * 1000
+            repeat = true
+            restart()
+        }
+    }
+
+    function msToNextNightUpdate() {
+        var now = new Date()
+        var next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 5, 0, 0)
+        return Math.max(60000, next.getTime() - now.getTime())
     }
 
     Component.onCompleted: {
@@ -300,12 +470,15 @@ Page {
         var year = today.getFullYear()
         var month = String(today.getMonth() + 1).padStart(2, '0')
         startDateField.text = year + "-" + month + "-01"
+        taxStartField.text = startDateField.text
         var lastDay = new Date(year, today.getMonth() + 1, 0).getDate()
         endDateField.text = year + "-" + month + "-" + String(lastDay).padStart(2, '0')
+        taxEndField.text = endDateField.text
         indirectMonthField.text = year + "-" + month
         indirectFromField.text = year + "-" + month + "-01"
         indirectToField.text = year + "-" + month + "-" + String(lastDay).padStart(2, '0')
         updateDashboard()
+        updateTaxReport()
         reloadIndirect()
     }
 }

@@ -35,25 +35,59 @@ def select_machine():
             print("Введите целое число.")
 
 def calculate_machine_cost_from_purchases(machine_id):
-    query = """
-        WITH latest_prices AS (
-            SELECT DISTINCT ON (material_id)
-                material_id,
-                price_per_unit
-            FROM purchases
-            WHERE price_per_unit IS NOT NULL
-            ORDER BY material_id, purchase_date DESC NULLS LAST
-        )
-        SELECT COALESCE(SUM(lp.price_per_unit * mm.quantity), 0)
-        FROM machine_materials mm
-        JOIN latest_prices lp ON mm.material_id = lp.material_id
-        WHERE mm.machine_id = %s
-    """
     update_query = "UPDATE machines SET total_cost = %s WHERE id = %s"
     with get_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute(query, (machine_id,))
-            total = cur.fetchone()[0]
+            cur.execute("""
+                SELECT material_id, quantity
+                FROM machine_materials
+                WHERE machine_id = %s
+            """, (machine_id,))
+            materials = cur.fetchall()
+
+            total = Decimal("0")
+            for material_id, required_qty in materials:
+                required_qty = Decimal(str(required_qty or 0))
+                if required_qty <= 0:
+                    continue
+
+                cur.execute("""
+                    SELECT COALESCE(remaining_quantity, 0), price_per_unit
+                    FROM purchases
+                    WHERE material_id = %s
+                      AND price_per_unit IS NOT NULL
+                      AND COALESCE(remaining_quantity, 0) > 0
+                    ORDER BY purchase_date ASC NULLS LAST, id ASC
+                """, (material_id,))
+                lots = cur.fetchall()
+
+                remaining = required_qty
+                line_cost = Decimal("0")
+                for lot_qty, lot_price in lots:
+                    if remaining <= 0:
+                        break
+                    lot_qty = Decimal(str(lot_qty or 0))
+                    lot_price = Decimal(str(lot_price or 0))
+                    if lot_qty <= 0:
+                        continue
+                    take = lot_qty if lot_qty < remaining else remaining
+                    line_cost += take * lot_price
+                    remaining -= take
+
+                if remaining > 0:
+                    cur.execute("""
+                        SELECT price_per_unit
+                        FROM purchases
+                        WHERE material_id = %s AND price_per_unit IS NOT NULL
+                        ORDER BY purchase_date DESC NULLS LAST, id DESC
+                        LIMIT 1
+                    """, (material_id,))
+                    last_price_row = cur.fetchone()
+                    if last_price_row and last_price_row[0] is not None:
+                        line_cost += remaining * Decimal(str(last_price_row[0]))
+
+                total += line_cost
+
             cur.execute(update_query, (total, machine_id))
         conn.commit()
     return total

@@ -19,6 +19,22 @@ def init_db():
         )
         """,
         """
+        CREATE TABLE IF NOT EXISTS material_conversions (
+            id SERIAL PRIMARY KEY,
+            source_material_id INT REFERENCES materials(id),
+            source_purchase_id INT REFERENCES purchases(id),
+            target_material_id INT REFERENCES materials(id),
+            source_quantity DECIMAL(12, 4) NOT NULL,
+            target_quantity DECIMAL(12, 4) NOT NULL,
+            total_cost DECIMAL(12, 2) NOT NULL DEFAULT 0,
+            notes TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+        """
+        ALTER TABLE material_conversions ADD COLUMN IF NOT EXISTS source_purchase_id INT REFERENCES purchases(id)
+        """,
+        """
         CREATE TABLE IF NOT EXISTS finished_goods (
             id SERIAL PRIMARY KEY,
             machine_model VARCHAR(255) NOT NULL,
@@ -65,6 +81,43 @@ def init_db():
             hourly_rate DECIMAL(10, 2),
             position VARCHAR(100),
             active BOOLEAN DEFAULT TRUE
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS employee_bonus_payments (
+            id SERIAL PRIMARY KEY,
+            period_start DATE NOT NULL,
+            period_end DATE NOT NULL,
+            bonus_percent DECIMAL(8, 2) NOT NULL,
+            base_amount DECIMAL(12, 2) NOT NULL DEFAULT 0,
+            bonus_amount DECIMAL(12, 2) NOT NULL DEFAULT 0,
+            paid_until DATE NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS employee_settlements (
+            id SERIAL PRIMARY KEY,
+            employee_id INT REFERENCES employees(id) ON DELETE CASCADE,
+            settlement_type VARCHAR(20) NOT NULL,
+            settlement_date DATE NOT NULL DEFAULT CURRENT_DATE,
+            title VARCHAR(255) NOT NULL,
+            amount DECIMAL(12, 2) NOT NULL DEFAULT 0,
+            notes TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS tax_payments (
+            id SERIAL PRIMARY KEY,
+            payment_date DATE NOT NULL DEFAULT CURRENT_DATE,
+            period_start DATE NOT NULL,
+            period_end DATE NOT NULL,
+            tax_rate DECIMAL(8, 2) NOT NULL DEFAULT 0,
+            tax_base DECIMAL(12, 2) NOT NULL DEFAULT 0,
+            tax_amount DECIMAL(12, 2) NOT NULL DEFAULT 0,
+            notes TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
         """,
         """
@@ -134,7 +187,12 @@ ALTER TABLE finished_goods ADD COLUMN IF NOT EXISTS production_status VARCHAR(20
 ""","""
 -- Добавляем информацию о покупателе (можно также брать из sales, но для удобства хранения)
 ALTER TABLE finished_goods ADD COLUMN IF NOT EXISTS buyer VARCHAR(255);
-ALTER TABLE finished_goods ADD COLUMN IF NOT EXISTS sale_date DATE;""",
+ALTER TABLE finished_goods ADD COLUMN IF NOT EXISTS sale_date DATE;""","""
+ALTER TABLE balance ADD COLUMN IF NOT EXISTS is_cash BOOLEAN DEFAULT FALSE;
+ALTER TABLE purchases ADD COLUMN IF NOT EXISTS is_cash BOOLEAN DEFAULT FALSE;""",
+"""
+ALTER TABLE materials ADD COLUMN IF NOT EXISTS updated_date DATE DEFAULT CURRENT_DATE;
+""",
     ]
     with get_connection() as conn:
         with conn.cursor() as cur:

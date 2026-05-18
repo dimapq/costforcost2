@@ -1,44 +1,87 @@
-import os
 import configparser
+import os
+import sys
 from pathlib import Path
 
-def get_config():
-    """Читает конфигурацию из config.ini"""
+
+def get_config_path():
+    """Returns the editable config.ini path for both source and packaged runs."""
+    cwd_config = Path.cwd() / 'config.ini'
+    if cwd_config.exists():
+        return cwd_config
+    if getattr(sys, 'frozen', False):
+        return Path(sys.executable).resolve().parent / 'config.ini'
+    return Path(__file__).resolve().parent.parent.parent / 'config.ini'
+
+
+def create_default_config(path=None):
+    config_path = Path(path) if path else get_config_path()
     config = configparser.ConfigParser()
-    
-    # Ищем config.ini в корне проекта
-    base_dir = Path(__file__).resolve().parent.parent.parent
-    config_path = base_dir / 'config.ini'
-    
+    config['database'] = {
+        'host': 'localhost',
+        'port': '5432',
+        'name': 'cost',
+        'user': 'postgres',
+        'password': ''
+    }
+    config['app'] = {'connection_confirmed': 'false'}
+    with open(config_path, 'w', encoding='utf-8') as file:
+        config.write(file)
+    return config_path
+
+
+def get_config(create_if_missing=False):
+    """Reads config.ini with database connection settings."""
+    config = configparser.ConfigParser()
+    config_path = get_config_path()
+
     if not config_path.exists():
-        raise FileNotFoundError(
-            f"Файл конфигурации не найден: {config_path}\n"
-            "Создайте файл config.ini в корне проекта со следующим содержимым:\n"
-            "[database]\n"
-            "host = localhost\n"
-            "port = 5432\n"
-            "name = cost\n"
-            "user = postgres\n"
-            "password = your_password"
-        )
-    
+        if create_if_missing:
+            create_default_config(config_path)
+        else:
+            raise FileNotFoundError(
+                f"Файл config.ini не найден: {config_path}\n"
+                "Создайте config.ini рядом с приложением или заполните подключение в стартовом окне."
+            )
+
     config.read(config_path, encoding='utf-8')
-    
     if 'database' not in config:
-        raise ValueError("Секция [database] не найдена в config.ini")
-    
+        if create_if_missing:
+            config['database'] = {}
+        else:
+            raise ValueError("Секция [database] не найдена в config.ini")
     return config
 
+
+def save_db_config(host, port, name, user, password, confirmed=True):
+    config = get_config(create_if_missing=True)
+    if 'database' not in config:
+        config['database'] = {}
+    config['database']['host'] = str(host or 'localhost').strip()
+    config['database']['port'] = str(port or '5432').strip()
+    config['database']['name'] = str(name or 'cost').strip()
+    config['database']['user'] = str(user or 'postgres').strip()
+    config['database']['password'] = str(password or '')
+    if 'app' not in config:
+        config['app'] = {}
+    config['app']['connection_confirmed'] = 'true' if confirmed else 'false'
+
+    config_path = get_config_path()
+    with open(config_path, 'w', encoding='utf-8') as file:
+        config.write(file)
+    return config_path
+
+
 def get_db_config():
-    """Возвращает параметры подключения к БД из config.ini"""
+    """Returns normalized database connection settings from config.ini."""
     config = get_config()
     db_config = config['database']
-    
+
     required_keys = ['host', 'port', 'name', 'user', 'password']
     for key in required_keys:
         if key not in db_config:
             raise ValueError(f"Параметр '{key}' не найден в секции [database] файла config.ini")
-    
+
     return {
         'host': db_config['host'],
         'port': int(db_config['port']),
@@ -46,3 +89,11 @@ def get_db_config():
         'user': db_config['user'],
         'password': db_config['password']
     }
+
+
+def is_connection_confirmed():
+    try:
+        config = get_config(create_if_missing=False)
+        return config.getboolean('app', 'connection_confirmed', fallback=False)
+    except Exception:
+        return False
