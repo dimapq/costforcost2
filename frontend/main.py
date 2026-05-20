@@ -14,7 +14,7 @@ if sys.platform == "win32":
     except AttributeError:
         pass
 
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtGui import QGuiApplication, QIcon
 from PySide6.QtQml import QQmlApplicationEngine, qmlRegisterType
 from PySide6.QtCore import QUrl
 
@@ -38,9 +38,14 @@ if __name__ == "__main__":
         # Запущено как EXE – данные в _internal/frontend/qml
         base_path = sys._MEIPASS
         qml_dir = os.path.join(base_path, "frontend", "qml")
+        logo_path = os.path.join(base_path, "logo.png")
     else:
         # Запущено как скрипт – данные рядом с main.py
         qml_dir = os.path.join(os.path.dirname(__file__), "qml")
+        logo_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "logo.png"))
+
+    if os.path.exists(logo_path):
+        app.setWindowIcon(QIcon(logo_path))
 
     # Регистрация кастомных моделей ДО создания движка QML
     qmlRegisterType(MaterialTableModel, "TableModels", 1, 0, "MaterialTableModel")
@@ -55,6 +60,7 @@ if __name__ == "__main__":
 
     backend = BackendController()
     engine.rootContext().setContextProperty("backend", backend)
+    engine.rootContext().setContextProperty("appLogoPath", QUrl.fromLocalFile(logo_path).toString())
 
     qml_file = os.path.join(qml_dir, "Main.qml")
     engine.load(QUrl.fromLocalFile(qml_file))

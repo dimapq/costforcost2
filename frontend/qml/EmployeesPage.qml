@@ -10,6 +10,14 @@ Page {
 
     EmployeeTableModel { id: employeeModel }
 
+    function employeeColumnWidth(column) {
+        if (column === 0) return 50
+        if (column === 1) return 150
+        if (column === 2) return 100
+        if (column === 3) return 120
+        return 80
+    }
+
     SplitView {
         anchors.fill: parent
         orientation: Qt.Horizontal
@@ -51,13 +59,13 @@ Page {
                     color: "#e8e8e8"
                     border.color: "#ccc"
 
-                    RowLayout {
+                    Row {
                         anchors.fill: parent
                         spacing: 0
                         Repeater {
                             model: ["ID", "Имя", "Ставка", "Должность", "Статус"]
                             Rectangle {
-                                width: index === 0 ? 50 : index === 1 ? 150 : index === 2 ? 100 : index === 3 ? 120 : 80
+                                width: employeesRoot.employeeColumnWidth(index)
                                 height: 35
                                 border.width: 0
                                 color: "transparent"
@@ -84,11 +92,7 @@ Page {
                     property int selectedEmployeeId: -1
 
                     columnWidthProvider: function(column) {
-                        if (column === 0) return 50
-                        if (column === 1) return 150
-                        if (column === 2) return 100
-                        if (column === 3) return 120
-                        return 80
+                        return employeesRoot.employeeColumnWidth(column)
                     }
 
                     delegate: Rectangle {

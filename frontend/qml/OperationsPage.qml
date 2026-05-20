@@ -5,6 +5,13 @@ import QtQuick.Layouts
 Page {
     title: "Быстрые операции"
 
+    function formatHoursAndMinutes(hoursValue) {
+        var totalMinutes = Math.round(Number(hoursValue) * 60)
+        var hours = Math.floor(totalMinutes / 60)
+        var minutes = totalMinutes % 60
+        return hours + " ч " + minutes + " мин"
+    }
+
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: 20
@@ -88,8 +95,8 @@ Page {
                             return Number.fromLocaleString(locale, text) * 10
                         }
                     }
-                    Label { 
-                        text: hoursSpinBox.realValue.toFixed(1) + " ч"
+                    Label {
+                        text: formatHoursAndMinutes(hoursSpinBox.realValue)
                         color: "#666"
                     }
                 }
@@ -203,10 +210,10 @@ Page {
             ListView {
                 id: transactionList
                 anchors.fill: parent
-                model: backend.getRecentTransactions(10)
+                model: backend.getRecentTransactions(50)
                 delegate: Rectangle {
                     width: parent.width
-                    height: 30
+                    height: 36
                     border.color: "#eee"
                     color: index % 2 ? "#fafafa" : "white"
 
@@ -232,7 +239,7 @@ Page {
             materialsValue.text = backend.getMaterialsSummary();
             toolsValue.text = backend.getToolsSummary();
             finishedValue.text = backend.getFinishedGoodsSummary();
-            transactionList.model = backend.getRecentTransactions(10);
+            transactionList.model = backend.getRecentTransactions(50);
         }
     }
 

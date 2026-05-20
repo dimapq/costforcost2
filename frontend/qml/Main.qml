@@ -7,19 +7,91 @@ ApplicationWindow {
     visible: true
     width: 1200
     height: 800
-    title: "MachineCost Pro"
+    title: "MachineCost Pro v1.2"
 
     property bool connectionReady: false
     property string connectionMessage: ""
+    property string settingsActionMessage: ""
+    property string settingsActionPath: ""
 
-    header: TabBar {
-        id: tabBar
-        enabled: root.connectionReady
-        TabButton { text: "Операции" }
-        TabButton { text: "Склад" }
-        TabButton { text: "Сотрудники" }
-        TabButton { text: "Станки" }
-        TabButton { text: "Финансы" }
+    header: ToolBar {
+        RowLayout {
+            anchors.fill: parent
+            anchors.leftMargin: 10
+            anchors.rightMargin: 10
+            spacing: 10
+
+            Image {
+                source: appLogoPath
+                sourceSize.width: 32
+                sourceSize.height: 32
+                fillMode: Image.PreserveAspectFit
+                smooth: true
+                Layout.preferredWidth: 36
+                Layout.preferredHeight: 36
+            }
+
+            Label {
+                text: "MachineCost Pro v1.2"
+                font.pixelSize: 16
+                font.bold: true
+                color: "#2f2f2f"
+                Layout.rightMargin: 8
+            }
+
+            TabBar {
+                id: tabBar
+                enabled: root.connectionReady
+                Layout.fillWidth: true
+                TabButton { text: "Операции" }
+                TabButton { text: "Склад" }
+                TabButton { text: "Сотрудники" }
+                TabButton { text: "Станки" }
+                TabButton { text: "Финансы" }
+            }
+
+            ToolButton {
+                id: settingsButton
+                text: "⚙"
+                font.pixelSize: 22
+                onClicked: settingsMenu.popup()
+            }
+        }
+    }
+
+    Menu {
+        id: settingsMenu
+
+        MenuItem {
+            text: "Настройка подключения"
+            onTriggered: {
+                loadDatabaseConfig()
+                root.connectionMessage = ""
+                connectionDialog.open()
+            }
+        }
+
+        MenuSeparator { }
+
+        MenuItem {
+            text: "Выгрузка всей БД в Excel"
+            onTriggered: {
+                var result = backend.exportFullDatabaseToExcel()
+                root.settingsActionMessage = result.message || ""
+                root.settingsActionPath = result.path || ""
+                settingsResultDialog.open()
+            }
+        }
+
+        MenuItem {
+            text: "Дамп всей базы для экспорта"
+            onTriggered: {
+                var result = backend.exportDatabaseDump()
+                root.settingsActionMessage = result.message || ""
+                root.settingsActionPath = result.path || ""
+                settingsResultDialog.open()
+            }
+        }
     }
 
     StackLayout {
@@ -148,6 +220,41 @@ ApplicationWindow {
                     text: "Закрыть"
                     enabled: root.connectionReady
                     onClicked: connectionDialog.close()
+                }
+            }
+        }
+    }
+
+    Dialog {
+        id: settingsResultDialog
+        title: "Результат"
+        modal: true
+        width: 560
+
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 10
+
+            Label {
+                text: root.settingsActionMessage
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+
+            Label {
+                text: root.settingsActionPath.length > 0 ? ("Файл: " + root.settingsActionPath) : ""
+                visible: root.settingsActionPath.length > 0
+                color: "#555"
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                Item { Layout.fillWidth: true }
+                Button {
+                    text: "Закрыть"
+                    onClicked: settingsResultDialog.close()
                 }
             }
         }

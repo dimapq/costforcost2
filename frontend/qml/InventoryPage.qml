@@ -444,8 +444,10 @@ Page {
             property string selectedUnit: ""
             property real selectedRemaining: 0
             property real selectedPrice: 0
+            property string selectedUpdatedDate: ""
 
             ListModel { id: plateLotsModel }
+            ListModel { id: platePartChoicesModel }
 
             function reloadLots() {
                 plateLotsModel.clear()
@@ -462,7 +464,35 @@ Page {
                         price_per_unit: lot.price_per_unit !== undefined ? lot.price_per_unit : 0,
                         purchase_date: lot.purchase_date || "",
                         source: lot.source || "",
+                        updated_date: lot.updated_date || "",
                         notes: lot.notes || ""
+                    })
+                }
+                if (plateCutTab.selectedPurchaseId > 0) {
+                    plateCutTab.reloadPartChoices()
+                } else {
+                    platePartChoicesModel.clear()
+                }
+            }
+
+            function reloadPartChoices() {
+                platePartChoicesModel.clear()
+                if (plateCutTab.selectedPurchaseId <= 0)
+                    return
+                var rows = backend.getPlateConversionHistory(plateCutTab.selectedPurchaseId)
+                for (var i = 0; i < rows.length; i++) {
+                    var item = rows[i] || {}
+                    var countText = item.conversion_count !== undefined ? item.conversion_count : 0
+                    platePartChoicesModel.append({
+                        target_material_id: item.target_material_id !== undefined ? item.target_material_id : -1,
+                        target_name: item.target_name || "",
+                        target_unit: item.target_unit || "",
+                        source_quantity: item.source_quantity !== undefined ? item.source_quantity : 0,
+                        target_quantity: item.target_quantity !== undefined ? item.target_quantity : 0,
+                        conversion_count: countText,
+                        last_converted_at: item.last_converted_at || "",
+                        notes: item.notes || "",
+                        choice_label: (item.target_name || "") + " (" + countText + " раз)"
                     })
                 }
             }
@@ -476,6 +506,7 @@ Page {
                     Layout.fillWidth: true
                     Label { text: "Плиты и листы по партиям"; font.bold: true; font.pixelSize: 18 }
                     Item { Layout.fillWidth: true }
+                    Button { text: "Добавить плиту"; onClicked: addPlateDialog.open() }
                     Button { text: "Обновить"; onClicked: plateCutTab.reloadLots() }
                     Button {
                         text: "Сделать деталь"
@@ -489,7 +520,18 @@ Page {
                             lotAreaQty.clear()
                             lotPartQty.text = "1"
                             lotPartUnit.text = "шт"
+                            lotUpdatedDate.text = plateCutTab.selectedUpdatedDate || new Date().toISOString().slice(0, 10)
                             lotNotes.clear()
+                            lotUseExisting.checked = platePartChoicesModel.count > 0
+                            lotExistingPart.currentIndex = platePartChoicesModel.count > 0 ? 0 : -1
+                            if (platePartChoicesModel.count > 0) {
+                                var firstPart = platePartChoicesModel.get(0)
+                                lotPartName.text = firstPart.target_name || ""
+                                lotPartUnit.text = firstPart.target_unit || "шт"
+                            } else {
+                                lotPartName.clear()
+                                lotPartUnit.text = "шт"
+                            }
                             lotConvertStatus.text = ""
                             convertLotDialog.open()
                         }
@@ -548,6 +590,8 @@ Page {
                                 plateCutTab.selectedUnit = model.unit
                                 plateCutTab.selectedRemaining = model.remaining_quantity
                                 plateCutTab.selectedPrice = model.price_per_unit
+                                plateCutTab.selectedUpdatedDate = model.updated_date || ""
+                                plateCutTab.reloadPartChoices()
                             }
                         }
                     }
@@ -562,6 +606,64 @@ Page {
             }
 
             Dialog {
+                id: addPlateDialog
+                title: "Добавить плиту"
+                standardButtons: Dialog.Ok | Dialog.Cancel
+                width: 520
+                height: 500
+
+                ColumnLayout {
+                    anchors.fill: parent
+                    spacing: 10
+                    Label { text: "Название плиты:" }
+                    TextField { id: plateNameField; Layout.fillWidth: true; placeholderText: "Например: Алюминиевая плита 1200x2400" }
+                    Label { text: "Цена за единицу (руб./м²):" }
+                    TextField { id: platePriceField; Layout.fillWidth: true; validator: DoubleValidator { bottom: 0.0001 } }
+                    Label { text: "Площадь / количество (м²):" }
+                    TextField { id: plateQtyField; Layout.fillWidth: true; text: "1"; validator: DoubleValidator { bottom: 0.0001 } }
+                    Label { text: "Источник:" }
+                    TextField { id: plateSourceField; Layout.fillWidth: true; placeholderText: "Поставщик, сайт, ссылка" }
+                    Label { text: "Дата обновления:" }
+                    TextField { id: plateDateField; Layout.fillWidth: true; text: new Date().toISOString().slice(0, 10); placeholderText: "2026-05-19" }
+                    Label { text: "Примечание:" }
+                    TextField { id: plateNotesField; Layout.fillWidth: true; placeholderText: "Например: лист под раскрой" }
+                    CheckBox { id: plateCashField; text: "Наличка" }
+                    Label { id: plateAddStatus; Layout.fillWidth: true; wrapMode: Text.WordWrap; color: "#b94a48"; text: "" }
+                }
+
+                onAccepted: {
+                    if (!plateNameField.text || !platePriceField.text || !plateQtyField.text) {
+                        plateAddStatus.text = "Заполните название, цену и количество"
+                        addPlateDialog.open()
+                        return
+                    }
+                    var ok = backend.addPlate(
+                        plateNameField.text,
+                        parseFloat((platePriceField.text || "0").replace(",", ".")),
+                        parseFloat((plateQtyField.text || "0").replace(",", ".")),
+                        plateSourceField.text,
+                        plateNotesField.text,
+                        plateDateField.text,
+                        plateCashField.checked
+                    )
+                    if (ok) {
+                        materialModel.refresh()
+                        plateCutTab.reloadLots()
+                        plateNameField.clear()
+                        platePriceField.clear()
+                        plateQtyField.text = "1"
+                        plateSourceField.clear()
+                        plateNotesField.clear()
+                        plateDateField.text = new Date().toISOString().slice(0, 10)
+                        plateCashField.checked = false
+                    } else {
+                        plateAddStatus.text = "Не удалось добавить плиту"
+                        addPlateDialog.open()
+                    }
+                }
+            }
+
+            Dialog {
                 id: convertLotDialog
                 title: "Сделать деталь из выбранной плиты"
                 standardButtons: Dialog.Ok | Dialog.Cancel
@@ -571,9 +673,27 @@ Page {
                 ColumnLayout {
                     anchors.fill: parent
                     spacing: 10
+                    CheckBox {
+                        id: lotUseExisting
+                        text: "Использовать уже изготовленную деталь из этой плиты"
+                        checked: platePartChoicesModel.count > 0
+                        enabled: platePartChoicesModel.count > 0
+                    }
+                    ComboBox {
+                        id: lotExistingPart
+                        Layout.fillWidth: true
+                        model: platePartChoicesModel
+                        textRole: "choice_label"
+                        enabled: lotUseExisting.checked && platePartChoicesModel.count > 0
+                        onActivated: {
+                            var choice = platePartChoicesModel.get(currentIndex)
+                            lotPartName.text = choice.target_name || ""
+                            lotPartUnit.text = choice.target_unit || "шт"
+                        }
+                    }
                     Label { id: lotSourceLabel; Layout.fillWidth: true; wrapMode: Text.WordWrap; font.bold: true; text: "" }
                     Label { text: "Название готовой детали:" }
-                    TextField { id: lotPartName; Layout.fillWidth: true; placeholderText: "Например: Боковая панель 420x300" }
+                    TextField { id: lotPartName; Layout.fillWidth: true; enabled: !lotUseExisting.checked; placeholderText: "Например: Боковая панель 420x300" }
                     Label { text: "Сколько списать из этой плиты (м²):" }
                     TextField {
                         id: lotAreaQty
@@ -589,21 +709,39 @@ Page {
                         text: "1"
                     }
                     Label { text: "Единица измерения детали:" }
-                    TextField { id: lotPartUnit; Layout.fillWidth: true; text: "шт" }
+                    TextField { id: lotPartUnit; Layout.fillWidth: true; enabled: !lotUseExisting.checked; text: "шт" }
+                    Label { text: "Дата обновления:" }
+                    TextField { id: lotUpdatedDate; Layout.fillWidth: true; text: new Date().toISOString().slice(0, 10); placeholderText: "2026-05-19" }
                     Label { text: "Примечание:" }
                     TextField { id: lotNotes; Layout.fillWidth: true; placeholderText: "Например: раскрой алюминиевой плиты" }
                     Label { id: lotConvertStatus; Layout.fillWidth: true; wrapMode: Text.WordWrap; color: "#b94a48"; text: "" }
                 }
 
                 onAccepted: {
-                    var result = backend.convertMaterialLotToPart(
-                        plateCutTab.selectedPurchaseId,
-                        lotPartName.text,
-                        parseFloat((lotAreaQty.text || "0").replace(",", ".")),
-                        parseFloat((lotPartQty.text || "1").replace(",", ".")),
-                        lotPartUnit.text,
-                        lotNotes.text
-                    )
+                    var areaValue = parseFloat((lotAreaQty.text || "0").replace(",", "."))
+                    var partValue = parseFloat((lotPartQty.text || "1").replace(",", "."))
+                    var result
+                    if (lotUseExisting.checked && platePartChoicesModel.count > 0 && lotExistingPart.currentIndex >= 0) {
+                        var chosen = platePartChoicesModel.get(lotExistingPart.currentIndex)
+                        result = backend.convertMaterialLotToExistingPart(
+                            plateCutTab.selectedPurchaseId,
+                            chosen.target_material_id,
+                            areaValue,
+                            partValue,
+                            lotUpdatedDate.text,
+                            lotNotes.text
+                        )
+                    } else {
+                        result = backend.convertMaterialLotToPart(
+                            plateCutTab.selectedPurchaseId,
+                            lotPartName.text,
+                            areaValue,
+                            partValue,
+                            lotPartUnit.text,
+                            lotUpdatedDate.text,
+                            lotNotes.text
+                        )
+                    }
                     if (result.ok) {
                         materialModel.refresh()
                         plateCutTab.reloadLots()
