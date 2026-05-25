@@ -4,7 +4,7 @@ from backend.db.connection import get_connection
 from backend.models.machine import calculate_machine_cost_from_purchases
 from backend.models.tools import apply_tool_depreciation_for_production
 
-def _consume_material_fifo(cur, material_id, required_qty):
+def _consume_material_fifo(cur, material_id, required_qty, finished_good_id=None):
     required_qty = Decimal(str(required_qty or 0))
     if required_qty <= 0:
         return Decimal('0.00')
@@ -13,7 +13,7 @@ def _consume_material_fifo(cur, material_id, required_qty):
     remaining = required_qty
 
     cur.execute("""
-        SELECT id, COALESCE(remaining_quantity, 0), price_per_unit
+        SELECT id, COALESCE(remaining_quantity, 0), price_per_unit, COALESCE(is_cash, FALSE)
         FROM purchases
         WHERE material_id = %s
           AND price_per_unit IS NOT NULL
@@ -22,7 +22,7 @@ def _consume_material_fifo(cur, material_id, required_qty):
     """, (material_id,))
     lots = cur.fetchall()
 
-    for purchase_id, lot_qty, lot_price in lots:
+    for purchase_id, lot_qty, lot_price, lot_is_cash in lots:
         if remaining <= 0:
             break
         lot_qty = Decimal(str(lot_qty or 0))
@@ -36,11 +36,17 @@ def _consume_material_fifo(cur, material_id, required_qty):
             SET remaining_quantity = remaining_quantity - %s
             WHERE id = %s
         """, (take, purchase_id))
+        if finished_good_id is not None:
+            cur.execute("""
+                INSERT INTO finished_good_material_consumptions
+                    (finished_good_id, material_id, purchase_id, quantity, amount, is_cash)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, (finished_good_id, material_id, purchase_id, take, take * lot_price, bool(lot_is_cash)))
         remaining -= take
 
     if remaining > 0:
         cur.execute("""
-            SELECT price_per_unit
+            SELECT price_per_unit, COALESCE(is_cash, FALSE)
             FROM purchases
             WHERE material_id = %s AND price_per_unit IS NOT NULL
             ORDER BY purchase_date DESC NULLS LAST, id DESC
@@ -48,7 +54,14 @@ def _consume_material_fifo(cur, material_id, required_qty):
         """, (material_id,))
         row = cur.fetchone()
         if row and row[0] is not None:
-            total_cost += remaining * Decimal(str(row[0]))
+            fallback_price = Decimal(str(row[0]))
+            total_cost += remaining * fallback_price
+            if finished_good_id is not None:
+                cur.execute("""
+                    INSERT INTO finished_good_material_consumptions
+                        (finished_good_id, material_id, purchase_id, quantity, amount, is_cash)
+                    VALUES (%s, %s, NULL, %s, %s, %s)
+                """, (finished_good_id, material_id, remaining, remaining * fallback_price, bool(row[1])))
 
     return total_cost
 
@@ -317,19 +330,67 @@ def get_in_progress_machines():
             return [{'id': r[0], 'model': r[1], 'date': str(r[2]), 'notes': r[3] or ''} for r in rows]
 
 
-def start_production_gui(machine_id, quantity, notes):
-    """РЎРѕР·РґР°С‘С‚ СЃС‚Р°РЅРєРё СЃРѕ СЃС‚Р°С‚СѓСЃРѕРј 'in_progress'."""
+def start_production_gui(machine_id, inventory_number, notes):
+    """Creates one machine in progress with the provided inventory number."""
+    inventory_number = (inventory_number or "").strip()
+    if not inventory_number:
+        print("Machine ID is required to start production")
+        return False
+
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute("ALTER TABLE IF EXISTS finished_goods ADD COLUMN IF NOT EXISTS start_date DATE")
             cur.execute("ALTER TABLE IF EXISTS finished_goods ADD COLUMN IF NOT EXISTS indirect_cost DECIMAL(12, 2) DEFAULT 0")
+            cur.execute("ALTER TABLE IF EXISTS finished_goods ADD COLUMN IF NOT EXISTS inventory_number VARCHAR(50)")
+            cur.execute("ALTER TABLE IF EXISTS purchases ADD COLUMN IF NOT EXISTS is_cash BOOLEAN DEFAULT FALSE")
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS finished_good_material_consumptions (
+                    id SERIAL PRIMARY KEY,
+                    finished_good_id INT REFERENCES finished_goods(id) ON DELETE CASCADE,
+                    material_id INT REFERENCES materials(id),
+                    purchase_id INT REFERENCES purchases(id),
+                    quantity DECIMAL(12, 4) NOT NULL DEFAULT 0,
+                    amount DECIMAL(12, 2) NOT NULL DEFAULT 0,
+                    is_cash BOOLEAN DEFAULT FALSE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
             cur.execute("SELECT model FROM machines WHERE id = %s", (machine_id,))
-            model = cur.fetchone()[0]
-            for _ in range(quantity):
-                cur.execute("""
-                    INSERT INTO finished_goods (machine_model, machine_id, cost_price, produced_date, start_date, status, notes)
-                    VALUES (%s, %s, 0, CURRENT_DATE, CURRENT_DATE, 'in_progress', %s)
-                """, (model, machine_id, notes))
+            row = cur.fetchone()
+            if not row:
+                print(f"Machine model with ID {machine_id} was not found")
+                return False
+            model = row[0]
+
+            cur.execute(
+                """
+                SELECT id
+                FROM finished_goods
+                WHERE inventory_number = %s
+                LIMIT 1
+                """,
+                (inventory_number,),
+            )
+            if cur.fetchone():
+                print(f"Machine with ID {inventory_number} already exists")
+                return False
+
+            cur.execute(
+                """
+                INSERT INTO finished_goods (
+                    machine_model,
+                    machine_id,
+                    cost_price,
+                    produced_date,
+                    start_date,
+                    status,
+                    inventory_number,
+                    notes
+                )
+                VALUES (%s, %s, 0, CURRENT_DATE, CURRENT_DATE, 'in_progress', %s, %s)
+                """,
+                (model, machine_id, inventory_number, notes),
+            )
             conn.commit()
     return True
 
@@ -354,6 +415,19 @@ def complete_machine_with_material_deduction(finished_good_id, inventory_number=
     """
     with get_connection() as conn:
         with conn.cursor() as cur:
+            cur.execute("ALTER TABLE IF EXISTS purchases ADD COLUMN IF NOT EXISTS is_cash BOOLEAN DEFAULT FALSE")
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS finished_good_material_consumptions (
+                    id SERIAL PRIMARY KEY,
+                    finished_good_id INT REFERENCES finished_goods(id) ON DELETE CASCADE,
+                    material_id INT REFERENCES materials(id),
+                    purchase_id INT REFERENCES purchases(id),
+                    quantity DECIMAL(12, 4) NOT NULL DEFAULT 0,
+                    amount DECIMAL(12, 2) NOT NULL DEFAULT 0,
+                    is_cash BOOLEAN DEFAULT FALSE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
             # 1. РџРѕР»СѓС‡Р°РµРј РґР°РЅРЅС‹Рµ Рѕ СЃС‚Р°РЅРєРµ
             cur.execute("""
                 SELECT machine_id, machine_model
@@ -402,7 +476,7 @@ def complete_machine_with_material_deduction(finished_good_id, inventory_number=
                     INSERT INTO material_transactions (material_id, quantity_change, transaction_type, reference_id)
                     VALUES (%s, %s, 'production', %s)
                 """, (mat_id, -qty, finished_good_id))
-                material_cost += _consume_material_fifo(cur, mat_id, qty)
+                material_cost += _consume_material_fifo(cur, mat_id, qty, finished_good_id=finished_good_id)
 
             # 4. РЈС‡РёС‚С‹РІР°РµРј С‚СЂСѓРґРѕР·Р°С‚СЂР°С‚С‹ (С„Р°РєС‚РёС‡РµСЃРєРёРµ С‡Р°СЃС‹)
             cur.execute("""

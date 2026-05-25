@@ -1,4 +1,4 @@
-import QtQuick
+﻿import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import TableModels 1.0
@@ -7,6 +7,7 @@ Page {
     title: "Сотрудники"
 
     id: employeesRoot
+    property string employeeActionMessage: ""
 
     EmployeeTableModel { id: employeeModel }
 
@@ -151,6 +152,17 @@ Page {
                         }
                     }
 
+                    Button {
+                        text: "Удалить"
+                        enabled: employeeTable.selectedEmployeeId > 0
+                        onClicked: {
+                            var emp = employeeModel.get(employeeTable.selectedRow)
+                            deleteEmployeeDialog.employeeId = emp.id
+                            deleteEmployeeDialog.employeeName = emp.name
+                            deleteEmployeeDialog.open()
+                        }
+                    }
+
                     Item { Layout.fillWidth: true }
 
                     Button {
@@ -174,11 +186,20 @@ Page {
                         }
                     }
                 }
+
+                Label {
+                    Layout.fillWidth: true
+                    text: employeesRoot.employeeActionMessage
+                    color: employeesRoot.employeeActionMessage.indexOf("Нельзя") >= 0 || employeesRoot.employeeActionMessage.indexOf("Ошибка") >= 0 ? "#b94a48" : "#2f6f3e"
+                    wrapMode: Text.WordWrap
+                    visible: text.length > 0
+                }
             }
         }
 
         // ========== ПРАВАЯ ПАНЕЛЬ: ИСТОРИЯ ДЕЙСТВИЙ ==========
         Item {
+            id: workHistoryPane
             SplitView.fillWidth: true
             SplitView.minimumWidth: 400
 
@@ -203,8 +224,8 @@ Page {
                         text: "Обновить историю"
                         onClicked: {
                             workHistoryList.loadHistory()
-                            parent.parent.parent.selectedWorkLogId = -1
-                            parent.parent.parent.selectedHistoryRow = -1
+                            workHistoryPane.selectedWorkLogId = -1
+                            workHistoryPane.selectedHistoryRow = -1
                         }
                     }
                 }
@@ -284,9 +305,9 @@ Page {
                         anchors.fill: parent
                         spacing: 0
                         Repeater {
-                            model: ["ID", "Дата", "Сотрудник", "Станок", "Часы", "Стоимость"]
+                            model: ["ID", "Дата", "Сотрудник", "Станок", "Часы", "Стоимость", "Примечание"]
                             Rectangle {
-                                width: index === 0 ? 50 : index === 1 ? 100 : index === 2 ? 180 : index === 3 ? 180 : index === 4 ? 80 : 120
+                                width: index === 0 ? 50 : index === 1 ? 100 : index === 2 ? 150 : index === 3 ? 150 : index === 4 ? 80 : index === 5 ? 120 : 260
                                 height: 35
                                 border.width: 0
                                 color: "transparent"
@@ -314,10 +335,10 @@ Page {
 
                         delegate: Rectangle {
                             width: workHistoryList.width
-                            height: 40
+                            height: 48
                             border.color: "#ddd"
                             color: {
-                                if (parent.parent.parent.parent.selectedHistoryRow === index) return "#b3d9ff"
+                                if (workHistoryPane.selectedHistoryRow === index) return "#b3d9ff"
                                 return index % 2 ? "#f9f9f9" : "white"
                             }
 
@@ -328,7 +349,7 @@ Page {
                                 // ID
                                 Rectangle {
                                     width: 50
-                                    height: 40
+                                    height: parent.height
                                     color: "transparent"
                                     Text {
                                         anchors.centerIn: parent
@@ -340,7 +361,7 @@ Page {
                                 // Дата
                                 Rectangle {
                                     width: 100
-                                    height: 40
+                                    height: parent.height
                                     color: "transparent"
                                     Text {
                                         anchors.centerIn: parent
@@ -351,8 +372,8 @@ Page {
 
                                 // Сотрудник
                                 Rectangle {
-                                    width: 180
-                                    height: 40
+                                    width: 150
+                                    height: parent.height
                                     color: "transparent"
                                     Text {
                                         anchors.centerIn: parent
@@ -365,8 +386,8 @@ Page {
 
                                 // Станок
                                 Rectangle {
-                                    width: 180
-                                    height: 40
+                                    width: 150
+                                    height: parent.height
                                     color: "transparent"
                                     Text {
                                         anchors.centerIn: parent
@@ -380,7 +401,7 @@ Page {
                                 // Часы
                                 Rectangle {
                                     width: 80
-                                    height: 40
+                                    height: parent.height
                                     color: "transparent"
                                     Text {
                                         anchors.centerIn: parent
@@ -392,7 +413,7 @@ Page {
                                 // Стоимость
                                 Rectangle {
                                     width: 120
-                                    height: 40
+                                    height: parent.height
                                     color: "transparent"
                                     Text {
                                         anchors.centerIn: parent
@@ -402,13 +423,32 @@ Page {
                                         color: "#2c5aa0"
                                     }
                                 }
+
+                                // Примечание
+                                Rectangle {
+                                    width: 260
+                                    height: parent.height
+                                    color: "transparent"
+                                    Text {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        anchors.left: parent.left
+                                        anchors.leftMargin: 6
+                                        anchors.right: parent.right
+                                        anchors.rightMargin: 6
+                                        text: model.notes || ""
+                                        font.pixelSize: 13
+                                        wrapMode: Text.WordWrap
+                                        maximumLineCount: 2
+                                        elide: Text.ElideRight
+                                    }
+                                }
                             }
 
                             MouseArea {
                                 anchors.fill: parent
                                 onClicked: {
-                                    parent.parent.parent.parent.parent.selectedHistoryRow = index
-                                    parent.parent.parent.parent.parent.selectedWorkLogId = model.work_log_id
+                                    workHistoryPane.selectedHistoryRow = index
+                                    workHistoryPane.selectedWorkLogId = model.work_log_id
                                 }
                             }
                         }
@@ -429,7 +469,8 @@ Page {
                                     "employee_name": h.employee_name !== undefined ? h.employee_name : "",
                                     "machine_model": h.machine_model !== undefined ? h.machine_model : "",
                                     "hours": h.hours !== undefined ? h.hours : 0,
-                                    "cost": h.cost !== undefined ? h.cost : 0
+                                    "cost": h.cost !== undefined ? h.cost : 0,
+                                    "notes": h.notes !== undefined ? h.notes : ""
                                 })
                             }
                         }
@@ -451,8 +492,8 @@ Page {
                     spacing: 10
 
                     Label {
-                        visible: parent.parent.selectedWorkLogId > 0
-                        text: "Выбрана запись ID: " + parent.parent.selectedWorkLogId
+                        visible: workHistoryPane.selectedWorkLogId > 0
+                        text: "Выбрана запись ID: " + workHistoryPane.selectedWorkLogId
                         font.bold: true
                         color: "#2c5aa0"
                     }
@@ -461,11 +502,11 @@ Page {
 
                     Button {
                         text: "Удалить выбранную запись"
-                        enabled: parent.parent.selectedWorkLogId > 0
-                        highlighted: parent.parent.selectedWorkLogId > 0
+                        enabled: workHistoryPane.selectedWorkLogId > 0
+                        highlighted: workHistoryPane.selectedWorkLogId > 0
                         onClicked: {
-                            var selectedId = parent.parent.selectedWorkLogId
-                            var selectedIndex = parent.parent.selectedHistoryRow
+                            var selectedId = workHistoryPane.selectedWorkLogId
+                            var selectedIndex = workHistoryPane.selectedHistoryRow
                             
                             if (selectedId > 0 && selectedIndex >= 0) {
                                 var record = workHistoryModel.get(selectedIndex)
@@ -1100,6 +1141,53 @@ Page {
         }
     }
 
+    Dialog {
+        id: deleteEmployeeDialog
+        title: "Удалить сотрудника"
+        standardButtons: Dialog.Yes | Dialog.No
+        width: 460
+        height: 220
+
+        property int employeeId: -1
+        property string employeeName: ""
+
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 10
+
+            Label {
+                text: "Удалить сотрудника?"
+                font.bold: true
+                font.pixelSize: 16
+            }
+
+            Label {
+                text: deleteEmployeeDialog.employeeName
+                    ? "Сотрудник: " + deleteEmployeeDialog.employeeName
+                    : ""
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+            }
+
+            Label {
+                text: "Удаление возможно только если у сотрудника нет связанных часов и взаиморасчётов."
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                color: "#666"
+            }
+        }
+
+        onAccepted: {
+            var result = backend.deleteEmployee(deleteEmployeeDialog.employeeId)
+            employeesRoot.employeeActionMessage = result.message || ""
+            if (result.ok) {
+                employeeModel.refresh()
+                employeeTable.selectedEmployeeId = -1
+                employeeTable.selectedRow = -1
+            }
+        }
+    }
+
     // Отмена записи о работе
     Dialog {
         id: undoWorkLogDialog
@@ -1164,15 +1252,8 @@ Page {
 
         onAccepted: {
             if (backend.undoWorkLog(undoWorkLogDialog.workLogId)) {
-                // Сбрасываем выбор
-                for (var i = 0; i < employeesRoot.children.length; i++) {
-                    var child = employeesRoot.children[i]
-                    if (child.selectedWorkLogId !== undefined) {
-                        child.selectedWorkLogId = -1
-                        child.selectedHistoryRow = -1
-                        break
-                    }
-                }
+                workHistoryPane.selectedWorkLogId = -1
+                workHistoryPane.selectedHistoryRow = -1
                 workHistoryList.loadHistory()
             }
         }

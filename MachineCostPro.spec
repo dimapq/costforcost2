@@ -2,10 +2,19 @@
 
 
 a = Analysis(
-    ['frontend\\main.py'],
+    ['frontend/main.py'],
     pathex=[],
     binaries=[],
-    datas=[('frontend/qml', 'frontend/qml'), ('backend', 'backend'), ('logo.png', '.'), ('logo.ico', '.')],
+    datas=[
+        ('frontend/qml', 'frontend/qml'),
+        ('backend', 'backend'),
+        ('newlogo.png', '.'),
+        ('logo.png', '.'),
+        ('prelogo.png', '.'),
+        ('prelogo', 'prelogo'),
+        ('logo.ico', '.'),
+        ('version.py', '.'),
+    ],
     hiddenimports=['psycopg2', 'pandas', 'openpyxl', 'requests', 'bs4', 'lxml', 'configparser', 'backend.db.config'],
     hookspath=[],
     hooksconfig={},
@@ -21,7 +30,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='MachineCostPro_v1.2',
+    name='MachineCostPro',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -41,5 +50,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='MachineCostPro_v1.2',
+    name='MachineCostPro',
 )

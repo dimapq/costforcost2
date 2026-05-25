@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Dialogs
 import TableModels 1.0
 
 Page {
@@ -186,25 +187,29 @@ Page {
                 title: "Добавить материал вручную"
                 standardButtons: Dialog.Ok | Dialog.Cancel
                 width: 460
-                height: 510
-                ColumnLayout {
+                height: 620
+                ScrollView {
                     anchors.fill: parent
-                    spacing: 10
-                    Label { text: "Название:" }
-                    TextField { id: matName; Layout.fillWidth: true }
-                    Label { text: "Единица измерения:" }
-                    TextField { id: matUnit; Layout.fillWidth: true; text: "шт" }
-                    Label { text: "Цена за единицу (руб):" }
-                    TextField { id: matPrice; Layout.fillWidth: true; validator: DoubleValidator { bottom: 0.01 } }
-                    Label { text: "Количество:" }
-                    TextField { id: matQty; Layout.fillWidth: true; validator: DoubleValidator { bottom: 0.01 } }
-                    Label { text: "Откуда взят:" }
-                    TextField { id: matSource; Layout.fillWidth: true; placeholderText: "Поставщик, сайт или ссылка" }
-                    Label { text: "Примечание:" }
-                    TextField { id: matNote; Layout.fillWidth: true; placeholderText: "Дополнительная информация" }
-                    Label { text: "Дата обновления (ГГГГ-ММ-ДД):" }
-                    TextField { id: matUpdatedDate; Layout.fillWidth: true; text: new Date().toISOString().slice(0, 10); placeholderText: "2026-05-18" }
-                    CheckBox { id: matIsCash; text: "Наличка" }
+                    clip: true
+                    ColumnLayout {
+                        width: manualAddDialog.availableWidth
+                        spacing: 10
+                        Label { text: "Название:" }
+                        TextField { id: matName; Layout.fillWidth: true }
+                        Label { text: "Единица измерения:" }
+                        TextField { id: matUnit; Layout.fillWidth: true; text: "шт" }
+                        Label { text: "Цена за единицу (руб):" }
+                        TextField { id: matPrice; Layout.fillWidth: true; validator: DoubleValidator { bottom: 0.01 } }
+                        Label { text: "Количество:" }
+                        TextField { id: matQty; Layout.fillWidth: true; validator: DoubleValidator { bottom: 0.01 } }
+                        Label { text: "Откуда взят:" }
+                        TextField { id: matSource; Layout.fillWidth: true; placeholderText: "Поставщик, сайт или ссылка" }
+                        Label { text: "Примечание:" }
+                        TextField { id: matNote; Layout.fillWidth: true; placeholderText: "Дополнительная информация" }
+                        Label { text: "Дата обновления (ГГГГ-ММ-ДД):" }
+                        TextField { id: matUpdatedDate; Layout.fillWidth: true; text: new Date().toISOString().slice(0, 10); placeholderText: "2026-05-18" }
+                        CheckBox { id: matIsCash; text: "Наличка" }
+                    }
                 }
                 onAccepted: {
                     if (matName.text && matPrice.text && matQty.text) {
@@ -435,9 +440,22 @@ Page {
             }
         }
 
-        // ================= ВКЛАДКА РАСКРОЙ ПЛИТ =================
+        // ================= Р’РљР›РђР”РљРђ Р РђРЎРљР РћР™ РџР›РРў =================
         Item {
             id: plateCutTab
+            property int selectedTemplateRow: -1
+            property int selectedTemplateId: -1
+            property string selectedTemplateName: ""
+            property string selectedTemplateUnit: "шт"
+            property int selectedTemplateMinutes: 0
+            property int selectedTemplateMaterialTypeId: -1
+            property string selectedTemplateMaterialTypeName: ""
+            property string selectedTemplateDrawingPath: ""
+            property string selectedTemplateProcessPath: ""
+            property string selectedTemplateDrawingName: ""
+            property string selectedTemplateProcessName: ""
+            property string selectedTemplateNotes: ""
+            property string templateExportStatus: ""
             property int selectedLotRow: -1
             property int selectedPurchaseId: -1
             property string selectedMaterialName: ""
@@ -445,13 +463,103 @@ Page {
             property real selectedRemaining: 0
             property real selectedPrice: 0
             property string selectedUpdatedDate: ""
+            property string selectedLotSource: ""
+            property string selectedLotNotes: ""
 
+            ListModel { id: plateMaterialTypesModel }
+            ListModel { id: plateTemplatesModel }
             ListModel { id: plateLotsModel }
-            ListModel { id: platePartChoicesModel }
+
+            function normalizeFilePath(urlValue) {
+                var value = urlValue ? urlValue.toString() : ""
+                if (value.indexOf("file:///") === 0)
+                    value = decodeURIComponent(value.substring(8))
+                return value
+            }
+
+            function formatMinutes(totalMinutes) {
+                var minutes = Number(totalMinutes || 0)
+                var hours = Math.floor(minutes / 60)
+                var rest = minutes % 60
+                if (hours > 0 && rest > 0)
+                    return hours + " ч " + rest + " мин"
+                if (hours > 0)
+                    return hours + " ч"
+                return rest + " мин"
+            }
+
+            function clearLotSelection() {
+                selectedLotRow = -1
+                selectedPurchaseId = -1
+                selectedMaterialName = ""
+                selectedUnit = ""
+                selectedRemaining = 0
+                selectedPrice = 0
+                selectedUpdatedDate = ""
+                selectedLotSource = ""
+                selectedLotNotes = ""
+            }
+
+            function clearTemplateSelection() {
+                selectedTemplateRow = -1
+                selectedTemplateId = -1
+                selectedTemplateName = ""
+                selectedTemplateUnit = "шт"
+                selectedTemplateMinutes = 0
+                selectedTemplateMaterialTypeId = -1
+                selectedTemplateMaterialTypeName = ""
+                selectedTemplateDrawingPath = ""
+                selectedTemplateProcessPath = ""
+                selectedTemplateDrawingName = ""
+                selectedTemplateProcessName = ""
+                selectedTemplateNotes = ""
+                templateExportStatus = ""
+                clearLotSelection()
+                plateLotsModel.clear()
+            }
+
+            function reloadMaterialTypes() {
+                plateMaterialTypesModel.clear()
+                var rows = backend.getPlateMaterialTypes()
+                for (var i = 0; i < rows.length; i++) {
+                    var item = rows[i] || {}
+                    plateMaterialTypesModel.append({
+                        id: item.id !== undefined ? item.id : -1,
+                        name: item.name || ""
+                    })
+                }
+            }
+
+            function reloadTemplates() {
+                plateTemplatesModel.clear()
+                var rows = backend.getPlatePartTemplates()
+                for (var i = 0; i < rows.length; i++) {
+                    var item = rows[i] || {}
+                    plateTemplatesModel.append({
+                        template_id: item.id !== undefined ? item.id : -1,
+                        name: item.name || "",
+                        material_type_id: item.material_type_id !== undefined ? item.material_type_id : -1,
+                        material_type_name: item.material_type_name || "",
+                        part_unit: item.part_unit || "шт",
+                        production_minutes: item.production_minutes !== undefined ? item.production_minutes : 0,
+                        drawing_file_path: item.drawing_file_path || "",
+                        process_file_path: item.process_file_path || "",
+                        drawing_file_name: item.drawing_file_name || "",
+                        process_file_name: item.process_file_name || "",
+                        has_drawing_file: item.has_drawing_file || false,
+                        has_process_file: item.has_process_file || false,
+                        notes: item.notes || ""
+                    })
+                }
+                clearTemplateSelection()
+            }
 
             function reloadLots() {
                 plateLotsModel.clear()
-                var rows = backend.getAreaMaterialLots()
+                clearLotSelection()
+                if (selectedTemplateMaterialTypeId <= 0)
+                    return
+                var rows = backend.getAreaMaterialLots(selectedTemplateMaterialTypeId)
                 for (var i = 0; i < rows.length; i++) {
                     var lot = rows[i] || {}
                     plateLotsModel.append({
@@ -465,36 +573,20 @@ Page {
                         purchase_date: lot.purchase_date || "",
                         source: lot.source || "",
                         updated_date: lot.updated_date || "",
-                        notes: lot.notes || ""
+                        notes: lot.notes || "",
+                        material_type_id: lot.material_type_id !== undefined ? lot.material_type_id : -1,
+                        material_type_name: lot.material_type_name || ""
                     })
-                }
-                if (plateCutTab.selectedPurchaseId > 0) {
-                    plateCutTab.reloadPartChoices()
-                } else {
-                    platePartChoicesModel.clear()
                 }
             }
 
-            function reloadPartChoices() {
-                platePartChoicesModel.clear()
-                if (plateCutTab.selectedPurchaseId <= 0)
-                    return
-                var rows = backend.getPlateConversionHistory(plateCutTab.selectedPurchaseId)
-                for (var i = 0; i < rows.length; i++) {
-                    var item = rows[i] || {}
-                    var countText = item.conversion_count !== undefined ? item.conversion_count : 0
-                    platePartChoicesModel.append({
-                        target_material_id: item.target_material_id !== undefined ? item.target_material_id : -1,
-                        target_name: item.target_name || "",
-                        target_unit: item.target_unit || "",
-                        source_quantity: item.source_quantity !== undefined ? item.source_quantity : 0,
-                        target_quantity: item.target_quantity !== undefined ? item.target_quantity : 0,
-                        conversion_count: countText,
-                        last_converted_at: item.last_converted_at || "",
-                        notes: item.notes || "",
-                        choice_label: (item.target_name || "") + " (" + countText + " раз)"
-                    })
-                }
+            function openManufactureDialog() {
+                manufactureStatus.text = ""
+                manufactureAreaField.clear()
+                manufactureQtyField.text = "1"
+                manufactureDateField.text = selectedUpdatedDate || new Date().toISOString().slice(0, 10)
+                manufactureNotesField.text = selectedTemplateNotes || ""
+                manufactureDialog.open()
             }
 
             ColumnLayout {
@@ -504,104 +596,316 @@ Page {
 
                 RowLayout {
                     Layout.fillWidth: true
-                    Label { text: "Плиты и листы по партиям"; font.bold: true; font.pixelSize: 18 }
+                    Label { text: "Раскрой плит"; font.bold: true; font.pixelSize: 18 }
                     Item { Layout.fillWidth: true }
-                    Button { text: "Добавить плиту"; onClicked: addPlateDialog.open() }
-                    Button { text: "Обновить"; onClicked: plateCutTab.reloadLots() }
+                    Button { text: "Добавить шаблон детали"; onClicked: { templateStatus.text = ""; addTemplateDialog.open() } }
+                    Button { text: "Добавить плиту"; onClicked: { plateAddStatus.text = ""; addPlateDialog.open() } }
                     Button {
-                        text: "Сделать деталь"
+                        text: "Удалить шаблон"
+                        enabled: plateCutTab.selectedTemplateId > 0
+                        onClicked: deleteTemplateDialog.open()
+                    }
+                    Button {
+                        text: "Удалить плиту"
                         enabled: plateCutTab.selectedPurchaseId > 0
-                        highlighted: plateCutTab.selectedPurchaseId > 0
                         onClicked: {
-                            lotSourceLabel.text = "Партия #" + plateCutTab.selectedPurchaseId + ": " + plateCutTab.selectedMaterialName +
-                                " | Остаток: " + plateCutTab.selectedRemaining.toFixed(4) + " " + plateCutTab.selectedUnit +
-                                " | Цена: " + plateCutTab.selectedPrice.toFixed(2) + " руб./" + plateCutTab.selectedUnit
-                            lotPartName.clear()
-                            lotAreaQty.clear()
-                            lotPartQty.text = "1"
-                            lotPartUnit.text = "шт"
-                            lotUpdatedDate.text = plateCutTab.selectedUpdatedDate || new Date().toISOString().slice(0, 10)
-                            lotNotes.clear()
-                            lotUseExisting.checked = platePartChoicesModel.count > 0
-                            lotExistingPart.currentIndex = platePartChoicesModel.count > 0 ? 0 : -1
-                            if (platePartChoicesModel.count > 0) {
-                                var firstPart = platePartChoicesModel.get(0)
-                                lotPartName.text = firstPart.target_name || ""
-                                lotPartUnit.text = firstPart.target_unit || "шт"
-                            } else {
-                                lotPartName.clear()
-                                lotPartUnit.text = "шт"
-                            }
-                            lotConvertStatus.text = ""
-                            convertLotDialog.open()
+                            deletePlateReasonField.clear()
+                            deletePlateDialog.open()
                         }
                     }
-                }
-
-                Rectangle {
-                    Layout.fillWidth: true
-                    height: 34
-                    color: "#e8e8e8"
-                    border.color: "#ccc"
-                    Row {
-                        anchors.fill: parent
-                        spacing: 0
-                        Repeater {
-                            model: ["ID партии", "Материал", "Остаток", "Было", "Цена", "Дата", "Откуда", "Примечание"]
-                            Rectangle {
-                                width: index === 0 ? 90 : index === 1 ? 230 : index === 2 ? 110 : index === 3 ? 100 : index === 4 ? 100 : index === 5 ? 110 : index === 6 ? 180 : 260
-                                height: 34
-                                color: "transparent"
-                                Text { anchors.centerIn: parent; text: modelData; font.pixelSize: 13; font.bold: true }
-                            }
+                    Button {
+                        text: "Обновить"
+                        onClicked: {
+                            plateCutTab.reloadMaterialTypes()
+                            plateCutTab.reloadTemplates()
                         }
                     }
-                }
-
-                ListView {
-                    id: plateLotsView
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    clip: true
-                    model: plateLotsModel
-                    delegate: Rectangle {
-                        width: plateLotsView.width
-                        height: 36
-                        border.color: "#ddd"
-                        color: plateCutTab.selectedLotRow === index ? "#b3d9ff" : (index % 2 ? "#f9f9f9" : "white")
-                        Row {
-                            anchors.fill: parent
-                            spacing: 0
-                            Text { width: 90; anchors.verticalCenter: parent.verticalCenter; horizontalAlignment: Text.AlignHCenter; text: model.purchase_id; font.pixelSize: 13 }
-                            Text { width: 230; anchors.verticalCenter: parent.verticalCenter; text: model.material_name; elide: Text.ElideRight; font.pixelSize: 13 }
-                            Text { width: 110; anchors.verticalCenter: parent.verticalCenter; horizontalAlignment: Text.AlignRight; text: Number(model.remaining_quantity).toFixed(4) + " " + model.unit + "  "; font.pixelSize: 13 }
-                            Text { width: 100; anchors.verticalCenter: parent.verticalCenter; horizontalAlignment: Text.AlignRight; text: Number(model.original_quantity).toFixed(4) + "  "; font.pixelSize: 13 }
-                            Text { width: 100; anchors.verticalCenter: parent.verticalCenter; horizontalAlignment: Text.AlignRight; text: Number(model.price_per_unit).toFixed(2) + "  "; font.pixelSize: 13 }
-                            Text { width: 110; anchors.verticalCenter: parent.verticalCenter; horizontalAlignment: Text.AlignHCenter; text: model.purchase_date; font.pixelSize: 13 }
-                            Text { width: 180; anchors.verticalCenter: parent.verticalCenter; text: model.source || "-"; elide: Text.ElideRight; font.pixelSize: 13 }
-                            Text { width: 260; anchors.verticalCenter: parent.verticalCenter; text: model.notes || "-"; elide: Text.ElideRight; font.pixelSize: 13 }
-                        }
-                        MouseArea {
-                            anchors.fill: parent
-                            onClicked: {
-                                plateCutTab.selectedLotRow = index
-                                plateCutTab.selectedPurchaseId = model.purchase_id
-                                plateCutTab.selectedMaterialName = model.material_name
-                                plateCutTab.selectedUnit = model.unit
-                                plateCutTab.selectedRemaining = model.remaining_quantity
-                                plateCutTab.selectedPrice = model.price_per_unit
-                                plateCutTab.selectedUpdatedDate = model.updated_date || ""
-                                plateCutTab.reloadPartChoices()
-                            }
-                        }
+                    Button {
+                        text: "Изготовить деталь"
+                        enabled: plateCutTab.selectedTemplateId > 0 && plateCutTab.selectedPurchaseId > 0
+                        highlighted: enabled
+                        onClicked: plateCutTab.openManufactureDialog()
                     }
                 }
 
                 Label {
                     Layout.fillWidth: true
-                    text: "Здесь показаны отдельные партии/плиты. Выбирайте конкретный ID партии, чтобы списать площадь именно из неё."
-                    color: "#666"
                     wrapMode: Text.WordWrap
+                    color: "#555"
+                    text: "Сначала выберите шаблон детали. После этого справа отобразятся только те плиты, которые подходят по материалу."
+                }
+
+                SplitView {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    orientation: Qt.Horizontal
+
+                    Item {
+                        SplitView.preferredWidth: 560
+                        SplitView.minimumWidth: 420
+
+                        ColumnLayout {
+                            anchors.fill: parent
+                            spacing: 8
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                height: 34
+                                color: "#e8e8e8"
+                                border.color: "#ccc"
+                                Row {
+                                    anchors.fill: parent
+                                    spacing: 0
+                                    Repeater {
+                                        model: ["Деталь", "Материал", "Ед.", "Время", "Чертеж", "Обработка"]
+                                        Rectangle {
+                                            width: index === 0 ? 190 : index === 1 ? 120 : index === 2 ? 55 : index === 3 ? 85 : 120
+                                            height: 34
+                                            color: "transparent"
+                                            Text { anchors.centerIn: parent; text: modelData; font.pixelSize: 13; font.bold: true }
+                                        }
+                                    }
+                                }
+                            }
+
+                            ListView {
+                                id: plateTemplatesView
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                                clip: true
+                                model: plateTemplatesModel
+                                delegate: Rectangle {
+                                    width: plateTemplatesView.width
+                                    height: 40
+                                    border.color: "#ddd"
+                                    color: plateCutTab.selectedTemplateRow === index ? "#b3d9ff" : (index % 2 ? "#f9f9f9" : "white")
+                                    Row {
+                                        anchors.fill: parent
+                                        spacing: 0
+                                        Text { width: 190; anchors.verticalCenter: parent.verticalCenter; leftPadding: 6; text: name; elide: Text.ElideRight; font.pixelSize: 13 }
+                                        Text { width: 120; anchors.verticalCenter: parent.verticalCenter; text: material_type_name; elide: Text.ElideRight; font.pixelSize: 13 }
+                                        Text { width: 55; anchors.verticalCenter: parent.verticalCenter; horizontalAlignment: Text.AlignHCenter; text: part_unit; font.pixelSize: 13 }
+                                        Text { width: 85; anchors.verticalCenter: parent.verticalCenter; horizontalAlignment: Text.AlignHCenter; text: plateCutTab.formatMinutes(production_minutes); font.pixelSize: 13 }
+                                        Text { width: 120; anchors.verticalCenter: parent.verticalCenter; text: has_drawing_file ? "Есть" : "-"; horizontalAlignment: Text.AlignHCenter; font.pixelSize: 13 }
+                                        Text { width: 120; anchors.verticalCenter: parent.verticalCenter; text: has_process_file ? "Есть" : "-"; horizontalAlignment: Text.AlignHCenter; font.pixelSize: 13 }
+                                    }
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        onClicked: {
+                                            plateCutTab.selectedTemplateRow = index
+                                            plateCutTab.selectedTemplateId = template_id
+                                            plateCutTab.selectedTemplateName = name || ""
+                                            plateCutTab.selectedTemplateUnit = part_unit || "шт"
+                                            plateCutTab.selectedTemplateMinutes = production_minutes || 0
+                                            plateCutTab.selectedTemplateMaterialTypeId = material_type_id || -1
+                                            plateCutTab.selectedTemplateMaterialTypeName = material_type_name || ""
+                                            plateCutTab.selectedTemplateDrawingPath = drawing_file_path || ""
+                                            plateCutTab.selectedTemplateProcessPath = process_file_path || ""
+                                            plateCutTab.selectedTemplateDrawingName = drawing_file_name || ""
+                                            plateCutTab.selectedTemplateProcessName = process_file_name || ""
+                                            plateCutTab.selectedTemplateNotes = notes || ""
+                                            plateCutTab.templateExportStatus = ""
+                                            plateCutTab.reloadLots()
+                                        }
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                color: "#f7f7f7"
+                                border.color: "#ddd"
+                                radius: 4
+                                implicitHeight: templateInfoColumn.implicitHeight + 16
+
+                                ColumnLayout {
+                                    id: templateInfoColumn
+                                    anchors.fill: parent
+                                    anchors.margins: 8
+                                    spacing: 6
+                                    Label { text: plateCutTab.selectedTemplateId > 0 ? "Шаблон: " + plateCutTab.selectedTemplateName : "Шаблон не выбран"; font.bold: true }
+                                    Label { text: "Материал: " + (plateCutTab.selectedTemplateMaterialTypeName || "-") }
+                                    Label { text: "Время: " + plateCutTab.formatMinutes(plateCutTab.selectedTemplateMinutes) }
+                                    Label { text: "Чертеж: " + (plateCutTab.selectedTemplateDrawingName || plateCutTab.selectedTemplateDrawingPath || "-"); Layout.fillWidth: true; wrapMode: Text.WrapAnywhere }
+                                    Label { text: "Файл обработки: " + (plateCutTab.selectedTemplateProcessName || plateCutTab.selectedTemplateProcessPath || "-"); Layout.fillWidth: true; wrapMode: Text.WrapAnywhere }
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        Button {
+                                            text: "Выгрузить чертеж"
+                                            enabled: plateCutTab.selectedTemplateId > 0 && (plateCutTab.selectedTemplateDrawingName || plateCutTab.selectedTemplateDrawingPath)
+                                            onClicked: exportDrawingDialog.open()
+                                        }
+                                        Button {
+                                            text: "Выгрузить обработку"
+                                            enabled: plateCutTab.selectedTemplateId > 0 && (plateCutTab.selectedTemplateProcessName || plateCutTab.selectedTemplateProcessPath)
+                                            onClicked: exportProcessDialog.open()
+                                        }
+                                    }
+                                    Label { text: plateCutTab.templateExportStatus; Layout.fillWidth: true; wrapMode: Text.WordWrap; color: plateCutTab.templateExportStatus.indexOf("Ошибка") >= 0 ? "#b94a48" : "#2d6a4f" }
+                                }
+                            }
+                        }
+                    }
+
+                    Item {
+                        SplitView.preferredWidth: 700
+                        SplitView.minimumWidth: 500
+
+                        ColumnLayout {
+                            anchors.fill: parent
+                            spacing: 8
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                height: 34
+                                color: "#e8e8e8"
+                                border.color: "#ccc"
+                                Row {
+                                    anchors.fill: parent
+                                    spacing: 0
+                                    Repeater {
+                                        model: ["ID партии", "Плита", "Остаток", "Цена", "Дата", "Источник"]
+                                        Rectangle {
+                                            width: index === 0 ? 90 : index === 1 ? 210 : index === 2 ? 110 : index === 3 ? 90 : index === 4 ? 110 : 180
+                                            height: 34
+                                            color: "transparent"
+                                            Text { anchors.centerIn: parent; text: modelData; font.pixelSize: 13; font.bold: true }
+                                        }
+                                    }
+                                }
+                            }
+
+                            ListView {
+                                id: plateLotsView
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                                clip: true
+                                model: plateLotsModel
+                                delegate: Rectangle {
+                                    width: plateLotsView.width
+                                    height: 40
+                                    border.color: "#ddd"
+                                    color: plateCutTab.selectedLotRow === index ? "#b3d9ff" : (index % 2 ? "#f9f9f9" : "white")
+                                    Row {
+                                        anchors.fill: parent
+                                        spacing: 0
+                                        Text { width: 90; anchors.verticalCenter: parent.verticalCenter; horizontalAlignment: Text.AlignHCenter; text: purchase_id; font.pixelSize: 13 }
+                                        Text { width: 210; anchors.verticalCenter: parent.verticalCenter; leftPadding: 6; text: material_name; elide: Text.ElideRight; font.pixelSize: 13 }
+                                        Text { width: 110; anchors.verticalCenter: parent.verticalCenter; horizontalAlignment: Text.AlignRight; text: Number(remaining_quantity).toFixed(4) + " " + unit + "  "; font.pixelSize: 13 }
+                                        Text { width: 90; anchors.verticalCenter: parent.verticalCenter; horizontalAlignment: Text.AlignRight; text: Number(price_per_unit).toFixed(2) + "  "; font.pixelSize: 13 }
+                                        Text { width: 110; anchors.verticalCenter: parent.verticalCenter; horizontalAlignment: Text.AlignHCenter; text: purchase_date; font.pixelSize: 13 }
+                                        Text { width: 180; anchors.verticalCenter: parent.verticalCenter; leftPadding: 6; text: source || "-"; elide: Text.ElideRight; font.pixelSize: 13 }
+                                    }
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        onClicked: {
+                                            plateCutTab.selectedLotRow = index
+                                            plateCutTab.selectedPurchaseId = purchase_id
+                                            plateCutTab.selectedMaterialName = material_name || ""
+                                            plateCutTab.selectedUnit = unit || ""
+                                            plateCutTab.selectedRemaining = remaining_quantity || 0
+                                            plateCutTab.selectedPrice = price_per_unit || 0
+                                            plateCutTab.selectedUpdatedDate = updated_date || ""
+                                            plateCutTab.selectedLotSource = source || ""
+                                            plateCutTab.selectedLotNotes = notes || ""
+                                        }
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                color: "#f7f7f7"
+                                border.color: "#ddd"
+                                radius: 4
+                                implicitHeight: lotInfoColumn.implicitHeight + 16
+
+                                ColumnLayout {
+                                    id: lotInfoColumn
+                                    anchors.fill: parent
+                                    anchors.margins: 8
+                                    spacing: 6
+                                    Label { text: plateCutTab.selectedPurchaseId > 0 ? "Плита: партия #" + plateCutTab.selectedPurchaseId : "Плита не выбрана"; font.bold: true }
+                                    Label { text: "Материал: " + (plateCutTab.selectedMaterialName || "-") }
+                                    Label { text: "Остаток: " + (plateCutTab.selectedPurchaseId > 0 ? Number(plateCutTab.selectedRemaining).toFixed(4) + " " + plateCutTab.selectedUnit : "-") }
+                                    Label { text: "Цена: " + (plateCutTab.selectedPurchaseId > 0 ? Number(plateCutTab.selectedPrice).toFixed(2) + " руб./" + plateCutTab.selectedUnit : "-") }
+                                    Label { text: "Источник: " + (plateCutTab.selectedLotSource || "-"); Layout.fillWidth: true; wrapMode: Text.WordWrap }
+                                    Label { text: "Примечание: " + (plateCutTab.selectedLotNotes || "-"); Layout.fillWidth: true; wrapMode: Text.WordWrap }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Dialog {
+                id: addTemplateDialog
+                title: "Добавить шаблон детали"
+                standardButtons: Dialog.Ok | Dialog.Cancel
+                width: 640
+                height: 560
+
+                ScrollView {
+                    anchors.fill: parent
+                    clip: true
+                    ColumnLayout {
+                        width: addTemplateDialog.availableWidth
+                        spacing: 10
+                        Label { text: "Название детали:" }
+                        TextField { id: templateNameField; Layout.fillWidth: true; placeholderText: "Например: Боковая панель 420x300" }
+                        Label { text: "Материал плиты:" }
+                        ComboBox { id: templateMaterialTypeCombo; Layout.fillWidth: true; model: plateMaterialTypesModel; textRole: "name" }
+                        Label { text: "Единица измерения детали:" }
+                        TextField { id: templateUnitField; Layout.fillWidth: true; text: "шт" }
+                        Label { text: "Время изготовления (минут):" }
+                        TextField { id: templateMinutesField; Layout.fillWidth: true; text: "0"; validator: IntValidator { bottom: 0 } }
+                        Label { text: "Файл чертежа:" }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            TextField { id: templateDrawingField; Layout.fillWidth: true; placeholderText: "Путь к файлу чертежа" }
+                            Button { text: "Выбрать"; onClicked: drawingFileDialog.open() }
+                        }
+                        Label { text: "Файл обработки:" }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            TextField { id: templateProcessField; Layout.fillWidth: true; placeholderText: "Путь к файлу обработки" }
+                            Button { text: "Выбрать"; onClicked: processFileDialog.open() }
+                        }
+                        Label { text: "Примечание:" }
+                        TextField { id: templateNotesField; Layout.fillWidth: true; placeholderText: "Дополнительная информация" }
+                        Label { id: templateStatus; Layout.fillWidth: true; wrapMode: Text.WordWrap; color: "#b94a48"; text: "" }
+                    }
+                }
+
+                onAccepted: {
+                    if (!templateNameField.text || templateMaterialTypeCombo.currentIndex < 0) {
+                        templateStatus.text = "Заполните название детали и выберите материал."
+                        addTemplateDialog.open()
+                        return
+                    }
+                    var typeItem = plateMaterialTypesModel.get(templateMaterialTypeCombo.currentIndex)
+                    var result = backend.addPlatePartTemplate(
+                        templateNameField.text,
+                        typeItem.id,
+                        templateUnitField.text,
+                        parseInt(templateMinutesField.text || "0"),
+                        templateDrawingField.text,
+                        templateProcessField.text,
+                        templateNotesField.text
+                    )
+                    if (result.ok) {
+                        plateCutTab.reloadTemplates()
+                        templateNameField.clear()
+                        templateUnitField.text = "шт"
+                        templateMinutesField.text = "0"
+                        templateDrawingField.clear()
+                        templateProcessField.clear()
+                        templateNotesField.clear()
+                        templateStatus.text = ""
+                    } else {
+                        templateStatus.text = result.message || "Не удалось сохранить шаблон детали."
+                        addTemplateDialog.open()
+                    }
                 }
             }
 
@@ -609,35 +913,43 @@ Page {
                 id: addPlateDialog
                 title: "Добавить плиту"
                 standardButtons: Dialog.Ok | Dialog.Cancel
-                width: 520
-                height: 500
+                width: 560
+                height: 560
 
-                ColumnLayout {
+                ScrollView {
                     anchors.fill: parent
-                    spacing: 10
-                    Label { text: "Название плиты:" }
-                    TextField { id: plateNameField; Layout.fillWidth: true; placeholderText: "Например: Алюминиевая плита 1200x2400" }
-                    Label { text: "Цена за единицу (руб./м²):" }
-                    TextField { id: platePriceField; Layout.fillWidth: true; validator: DoubleValidator { bottom: 0.0001 } }
-                    Label { text: "Площадь / количество (м²):" }
-                    TextField { id: plateQtyField; Layout.fillWidth: true; text: "1"; validator: DoubleValidator { bottom: 0.0001 } }
-                    Label { text: "Источник:" }
-                    TextField { id: plateSourceField; Layout.fillWidth: true; placeholderText: "Поставщик, сайт, ссылка" }
-                    Label { text: "Дата обновления:" }
-                    TextField { id: plateDateField; Layout.fillWidth: true; text: new Date().toISOString().slice(0, 10); placeholderText: "2026-05-19" }
-                    Label { text: "Примечание:" }
-                    TextField { id: plateNotesField; Layout.fillWidth: true; placeholderText: "Например: лист под раскрой" }
-                    CheckBox { id: plateCashField; text: "Наличка" }
-                    Label { id: plateAddStatus; Layout.fillWidth: true; wrapMode: Text.WordWrap; color: "#b94a48"; text: "" }
+                    clip: true
+                    ColumnLayout {
+                        width: addPlateDialog.availableWidth
+                        spacing: 10
+                        Label { text: "Материал плиты:" }
+                        ComboBox { id: plateMaterialTypeCombo; Layout.fillWidth: true; model: plateMaterialTypesModel; textRole: "name" }
+                        Label { text: "Дополнение к названию плиты:" }
+                        TextField { id: plateNameField; Layout.fillWidth: true; placeholderText: "Например: 1200x2400 3мм" }
+                        Label { text: "Цена за м² (руб.):" }
+                        TextField { id: platePriceField; Layout.fillWidth: true; validator: DoubleValidator { bottom: 0.0001 } }
+                        Label { text: "Площадь / количество (м²):" }
+                        TextField { id: plateQtyField; Layout.fillWidth: true; text: "1"; validator: DoubleValidator { bottom: 0.0001 } }
+                        Label { text: "Откуда взято:" }
+                        TextField { id: plateSourceField; Layout.fillWidth: true; placeholderText: "Поставщик, сайт, ссылка" }
+                        Label { text: "Дата обновления:" }
+                        TextField { id: plateDateField; Layout.fillWidth: true; text: new Date().toISOString().slice(0, 10); placeholderText: "2026-05-19" }
+                        Label { text: "Примечание:" }
+                        TextField { id: plateNotesField; Layout.fillWidth: true; placeholderText: "Например: лист под раскрой" }
+                        CheckBox { id: plateCashField; text: "Наличка" }
+                        Label { id: plateAddStatus; Layout.fillWidth: true; wrapMode: Text.WordWrap; color: "#b94a48"; text: "" }
+                    }
                 }
 
                 onAccepted: {
-                    if (!plateNameField.text || !platePriceField.text || !plateQtyField.text) {
-                        plateAddStatus.text = "Заполните название, цену и количество"
+                    if (plateMaterialTypeCombo.currentIndex < 0 || !platePriceField.text || !plateQtyField.text) {
+                        plateAddStatus.text = "Выберите материал плиты, цену и количество."
                         addPlateDialog.open()
                         return
                     }
+                    var plateType = plateMaterialTypesModel.get(plateMaterialTypeCombo.currentIndex)
                     var ok = backend.addPlate(
+                        plateType.id,
                         plateNameField.text,
                         parseFloat((platePriceField.text || "0").replace(",", ".")),
                         parseFloat((plateQtyField.text || "0").replace(",", ".")),
@@ -656,105 +968,182 @@ Page {
                         plateNotesField.clear()
                         plateDateField.text = new Date().toISOString().slice(0, 10)
                         plateCashField.checked = false
+                        plateAddStatus.text = ""
                     } else {
-                        plateAddStatus.text = "Не удалось добавить плиту"
+                        plateAddStatus.text = "Не удалось добавить плиту."
                         addPlateDialog.open()
                     }
                 }
             }
 
             Dialog {
-                id: convertLotDialog
-                title: "Сделать деталь из выбранной плиты"
+                id: manufactureDialog
+                title: "Изготовить деталь из плиты"
                 standardButtons: Dialog.Ok | Dialog.Cancel
-                width: 540
-                height: 430
+                width: 560
+                height: 420
 
                 ColumnLayout {
                     anchors.fill: parent
                     spacing: 10
-                    CheckBox {
-                        id: lotUseExisting
-                        text: "Использовать уже изготовленную деталь из этой плиты"
-                        checked: platePartChoicesModel.count > 0
-                        enabled: platePartChoicesModel.count > 0
-                    }
-                    ComboBox {
-                        id: lotExistingPart
+                    Label {
                         Layout.fillWidth: true
-                        model: platePartChoicesModel
-                        textRole: "choice_label"
-                        enabled: lotUseExisting.checked && platePartChoicesModel.count > 0
-                        onActivated: {
-                            var choice = platePartChoicesModel.get(currentIndex)
-                            lotPartName.text = choice.target_name || ""
-                            lotPartUnit.text = choice.target_unit || "шт"
-                        }
+                        wrapMode: Text.WordWrap
+                        font.bold: true
+                        text: "Шаблон: " + plateCutTab.selectedTemplateName + " | Материал: " + plateCutTab.selectedTemplateMaterialTypeName
                     }
-                    Label { id: lotSourceLabel; Layout.fillWidth: true; wrapMode: Text.WordWrap; font.bold: true; text: "" }
-                    Label { text: "Название готовой детали:" }
-                    TextField { id: lotPartName; Layout.fillWidth: true; enabled: !lotUseExisting.checked; placeholderText: "Например: Боковая панель 420x300" }
-                    Label { text: "Сколько списать из этой плиты (м²):" }
+                    Label {
+                        Layout.fillWidth: true
+                        wrapMode: Text.WordWrap
+                        text: "Плита: партия #" + plateCutTab.selectedPurchaseId + " — " + plateCutTab.selectedMaterialName + ", остаток " + Number(plateCutTab.selectedRemaining).toFixed(4) + " " + plateCutTab.selectedUnit
+                    }
+                    Label { text: "Сколько списать с плиты (м²):" }
                     TextField {
-                        id: lotAreaQty
+                        id: manufactureAreaField
                         Layout.fillWidth: true
                         validator: DoubleValidator { bottom: 0.0001 }
                         placeholderText: "Например: 0.35"
                     }
                     Label { text: "Сколько деталей получится:" }
-                    TextField {
-                        id: lotPartQty
-                        Layout.fillWidth: true
-                        validator: DoubleValidator { bottom: 0.0001 }
-                        text: "1"
-                    }
-                    Label { text: "Единица измерения детали:" }
-                    TextField { id: lotPartUnit; Layout.fillWidth: true; enabled: !lotUseExisting.checked; text: "шт" }
+                    TextField { id: manufactureQtyField; Layout.fillWidth: true; text: "1"; validator: DoubleValidator { bottom: 0.0001 } }
                     Label { text: "Дата обновления:" }
-                    TextField { id: lotUpdatedDate; Layout.fillWidth: true; text: new Date().toISOString().slice(0, 10); placeholderText: "2026-05-19" }
+                    TextField { id: manufactureDateField; Layout.fillWidth: true; text: new Date().toISOString().slice(0, 10) }
                     Label { text: "Примечание:" }
-                    TextField { id: lotNotes; Layout.fillWidth: true; placeholderText: "Например: раскрой алюминиевой плиты" }
-                    Label { id: lotConvertStatus; Layout.fillWidth: true; wrapMode: Text.WordWrap; color: "#b94a48"; text: "" }
+                    TextField { id: manufactureNotesField; Layout.fillWidth: true; placeholderText: "Например: раскрой партии под заказ" }
+                    Label { id: manufactureStatus; Layout.fillWidth: true; wrapMode: Text.WordWrap; color: "#b94a48"; text: "" }
                 }
 
                 onAccepted: {
-                    var areaValue = parseFloat((lotAreaQty.text || "0").replace(",", "."))
-                    var partValue = parseFloat((lotPartQty.text || "1").replace(",", "."))
-                    var result
-                    if (lotUseExisting.checked && platePartChoicesModel.count > 0 && lotExistingPart.currentIndex >= 0) {
-                        var chosen = platePartChoicesModel.get(lotExistingPart.currentIndex)
-                        result = backend.convertMaterialLotToExistingPart(
-                            plateCutTab.selectedPurchaseId,
-                            chosen.target_material_id,
-                            areaValue,
-                            partValue,
-                            lotUpdatedDate.text,
-                            lotNotes.text
-                        )
-                    } else {
-                        result = backend.convertMaterialLotToPart(
-                            plateCutTab.selectedPurchaseId,
-                            lotPartName.text,
-                            areaValue,
-                            partValue,
-                            lotPartUnit.text,
-                            lotUpdatedDate.text,
-                            lotNotes.text
-                        )
-                    }
+                    var areaValue = parseFloat((manufactureAreaField.text || "0").replace(",", "."))
+                    var qtyValue = parseFloat((manufactureQtyField.text || "1").replace(",", "."))
+                    var result = backend.convertPlateLotToTemplate(
+                        plateCutTab.selectedPurchaseId,
+                        plateCutTab.selectedTemplateId,
+                        areaValue,
+                        qtyValue,
+                        manufactureDateField.text,
+                        manufactureNotesField.text
+                    )
                     if (result.ok) {
                         materialModel.refresh()
                         plateCutTab.reloadLots()
-                        plateCutTab.selectedLotRow = -1
-                        plateCutTab.selectedPurchaseId = -1
+                        manufactureStatus.text = ""
                     } else {
-                        lotConvertStatus.text = result.message || "Не удалось сделать деталь"
-                        convertLotDialog.open()
+                        manufactureStatus.text = result.message || "Не удалось изготовить деталь."
+                        manufactureDialog.open()
                     }
                 }
             }
 
-            Component.onCompleted: reloadLots()
+            Dialog {
+                id: deleteTemplateDialog
+                title: "Удалить шаблон"
+                standardButtons: Dialog.Yes | Dialog.No
+                width: 420
+                height: 180
+
+                ColumnLayout {
+                    anchors.fill: parent
+                    spacing: 10
+                    Label {
+                        Layout.fillWidth: true
+                        wrapMode: Text.WordWrap
+                        text: "Удалить шаблон \"" + plateCutTab.selectedTemplateName + "\"? История изготовления сохранится."
+                    }
+                }
+
+                onAccepted: {
+                    var result = backend.deletePlatePartTemplate(plateCutTab.selectedTemplateId)
+                    plateCutTab.templateExportStatus = result.message || ""
+                    if (result.ok) {
+                        plateCutTab.reloadTemplates()
+                    } else {
+                        deleteTemplateDialog.open()
+                    }
+                }
+            }
+
+            Dialog {
+                id: deletePlateDialog
+                title: "Удалить плиту"
+                standardButtons: Dialog.Yes | Dialog.No
+                width: 460
+                height: 240
+
+                ColumnLayout {
+                    anchors.fill: parent
+                    spacing: 10
+                    Label {
+                        Layout.fillWidth: true
+                        wrapMode: Text.WordWrap
+                        text: "Удалить плиту \"" + plateCutTab.selectedMaterialName + "\" (партия #" + plateCutTab.selectedPurchaseId + ")? Остаток этой партии будет списан в ноль."
+                    }
+                    Label { text: "Причина:" }
+                    TextField {
+                        id: deletePlateReasonField
+                        Layout.fillWidth: true
+                        placeholderText: "Например: ошибочное добавление"
+                    }
+                }
+
+                onAccepted: {
+                    var result = backend.deletePlateLot(plateCutTab.selectedPurchaseId, deletePlateReasonField.text)
+                    plateCutTab.templateExportStatus = result.message || ""
+                    if (result.ok) {
+                        plateCutTab.reloadLots()
+                        materialModel.refresh()
+                    } else {
+                        deletePlateDialog.open()
+                    }
+                }
+            }
+
+            FileDialog {
+                id: drawingFileDialog
+                title: "Выберите файл чертежа"
+                fileMode: FileDialog.OpenFile
+                onAccepted: templateDrawingField.text = plateCutTab.normalizeFilePath(selectedFile)
+            }
+
+            FileDialog {
+                id: processFileDialog
+                title: "Выберите файл обработки"
+                fileMode: FileDialog.OpenFile
+                onAccepted: templateProcessField.text = plateCutTab.normalizeFilePath(selectedFile)
+            }
+
+
+            FileDialog {
+                id: exportDrawingDialog
+                title: "Сохранить чертеж"
+                fileMode: FileDialog.SaveFile
+                currentFile: plateCutTab.selectedTemplateDrawingName || "drawing.dat"
+                onAccepted: {
+                    var result = backend.exportPlateTemplateDrawingFile(
+                        plateCutTab.selectedTemplateId,
+                        plateCutTab.normalizeFilePath(selectedFile)
+                    )
+                    plateCutTab.templateExportStatus = result.message || (result.ok ? "Чертеж выгружен." : "Ошибка экспорта чертежа.")
+                }
+            }
+
+            FileDialog {
+                id: exportProcessDialog
+                title: "Сохранить файл обработки"
+                fileMode: FileDialog.SaveFile
+                currentFile: plateCutTab.selectedTemplateProcessName || "process.dat"
+                onAccepted: {
+                    var result = backend.exportPlateTemplateProcessFile(
+                        plateCutTab.selectedTemplateId,
+                        plateCutTab.normalizeFilePath(selectedFile)
+                    )
+                    plateCutTab.templateExportStatus = result.message || (result.ok ? "Файл обработки выгружен." : "Ошибка экспорта файла обработки.")
+                }
+            }
+            Component.onCompleted: {
+                reloadMaterialTypes()
+                reloadTemplates()
+            }
         }
 
         // ================= ВКЛАДКА ИНСТРУМЕНТЫ =================

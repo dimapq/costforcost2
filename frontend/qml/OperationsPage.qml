@@ -5,6 +5,8 @@ import QtQuick.Layouts
 Page {
     title: "Быстрые операции"
 
+    property string successBannerText: ""
+
     function formatHoursAndMinutes(hoursValue) {
         var totalMinutes = Math.round(Number(hoursValue) * 60)
         var hours = Math.floor(totalMinutes / 60)
@@ -128,6 +130,9 @@ Page {
                                 workNotesField.clear()
                                 hoursSpinBox.value = 80
                                 inProgressMachineCombo.refreshInProgressList()
+                                successBannerText = "Часы успешно добавлены"
+                                successBanner.open()
+                                successBannerTimer.restart()
                             }
                         }
                     }
@@ -228,6 +233,40 @@ Page {
                 }
             }
         }
+    }
+
+    Popup {
+        id: successBanner
+        x: (parent.width - width) / 2
+        y: 16
+        width: bannerLabel.implicitWidth + 36
+        height: 46
+        modal: false
+        focus: false
+        closePolicy: Popup.NoAutoClose
+        padding: 0
+        background: Rectangle {
+            radius: 8
+            color: "#dff3e3"
+            border.color: "#86c796"
+        }
+
+        contentItem: Label {
+            id: bannerLabel
+            text: successBannerText
+            color: "#1f6b33"
+            font.bold: true
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+            padding: 12
+        }
+    }
+
+    Timer {
+        id: successBannerTimer
+        interval: 2200
+        repeat: false
+        onTriggered: successBanner.close()
     }
 
     Timer {

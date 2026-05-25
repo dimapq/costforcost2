@@ -10,7 +10,8 @@ Page {
         id: bar
         width: parent.width
         TabButton { text: "В процессе" }
-        TabButton { text: "Готовые" }
+        TabButton { text: "На складе" }
+        TabButton { text: "Проданные" }
         TabButton { text: "Редактор моделей" }
     }
 
@@ -19,13 +20,14 @@ Page {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
-        currentIndex: bar.currentIndex
+        currentIndex: bar.currentIndex === 0 ? 0 : (bar.currentIndex === 3 ? 2 : 1)
 
         // ================= TAB 1: In Progress =================
         Item {
             id: tab1Root
             property int selectedInProgressId: -1
             property int selectedRow: -1
+            property string selectedInProgressInventoryNumber: ""
             property string exportMessage: ""
 
             InProgressModel { id: inProgressModel }
@@ -72,9 +74,9 @@ Page {
                                 anchors.fill: parent
                                 spacing: 0
                                 Repeater {
-                                    model: ["#", "Модель", "Дата начала", "Статус"]
+                                    model: ["#", "Модель", "ID станка", "Дата начала", "Часы", "Косвенные", "Общая", "Примечание"]
                                     Rectangle {
-                                        width: index === 0 ? 50 : index === 1 ? 180 : index === 2 ? 120 : 50
+                                        width: index === 0 ? 50 : index === 1 ? 150 : index === 2 ? 110 : index === 3 ? 105 : index === 4 ? 80 : index === 5 ? 110 : index === 6 ? 110 : 180
                                         height: 30
                                         border.color: "#ccc"
                                         color: "transparent"
@@ -97,9 +99,13 @@ Page {
                             clip: true
                             columnWidthProvider: function(column) {
                                 if (column === 0) return 50
-                                if (column === 1) return 180
-                                if (column === 2) return 120
-                                return 50
+                                if (column === 1) return 150
+                                if (column === 2) return 110
+                                if (column === 3) return 105
+                                if (column === 4) return 80
+                                if (column === 5) return 110
+                                if (column === 6) return 110
+                                return 180
                             }
                             
                             delegate: Rectangle {
@@ -123,6 +129,7 @@ Page {
                                         tab1Root.selectedRow = row
                                         var item = inProgressModel.get(row)
                                         tab1Root.selectedInProgressId = item.id
+                                        tab1Root.selectedInProgressInventoryNumber = item.inventory_number || ""
                                         materialsCheckList.loadMaterialsCheck(item.id)
                                     }
                                 }
@@ -159,7 +166,7 @@ Page {
                             }
                             Label {
                                 visible: tab1Root.selectedInProgressId > 0 && !materialsCheckList.allMaterialsAvailable
-                                text: "Материалы доступны"
+                                text: "Не все материалы доступны"
                                 color: "#d9534f"
                                 font.bold: true
                             }
@@ -187,7 +194,7 @@ Page {
 
                         Label {
                             text: tab1Root.selectedInProgressId > 0 ? 
-                                "Выбранный станок (ID " + tab1Root.selectedInProgressId + ")" :
+                                "Выбранный станок (запись " + tab1Root.selectedInProgressId + ", ID станка " + (tab1Root.selectedInProgressInventoryNumber.length > 0 ? tab1Root.selectedInProgressInventoryNumber : "-") + ")" :
                                 "Выберите станок слева, чтобы посмотреть проверку материалов"
                             font.pixelSize: 16
                             font.bold: true
@@ -379,6 +386,7 @@ Page {
                     backend.completeMachine(tab1Root.selectedInProgressId, invNumberField.text)
                     tab1Root.selectedRow = -1
                     tab1Root.selectedInProgressId = -1
+                    tab1Root.selectedInProgressInventoryNumber = ""
                     inProgressModel.refresh()
                     materialsCheckModel.clear()
                     invNumberField.clear()
@@ -418,6 +426,7 @@ Page {
                     if (backend.cancelProduction(tab1Root.selectedInProgressId)) {
                         tab1Root.selectedRow = -1
                         tab1Root.selectedInProgressId = -1
+                        tab1Root.selectedInProgressInventoryNumber = ""
                         inProgressModel.refresh()
                         materialsCheckModel.clear()
                     }
@@ -435,19 +444,13 @@ Page {
 
             FinishedGoodsModel { id: finishedModel }
 
-            TabBar {
-                id: finishedTabBar
-                width: parent.width
-                TabButton { text: "На складе" }
-                TabButton { text: "Проданные" }
-            }
 
             StackLayout {
-                anchors.top: finishedTabBar.bottom
+                anchors.top: parent.top
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.bottom: parent.bottom
-                currentIndex: finishedTabBar.currentIndex
+                currentIndex: bar.currentIndex === 2 ? 1 : 0
 
 
                 // ========== Р СџР С›Р вЂќР вЂ™Р С™Р вЂєР С’Р вЂќР С™Р С’: Р СњР С’ Р РЋР С™Р вЂєР С’Р вЂќР вЂў ==========
@@ -751,9 +754,9 @@ Page {
                                 anchors.fill: parent
                                 spacing: 0
                                 Repeater {
-                                    model: ["#", "Модель", "Инв. №", "Дата начала", "Дата продажи", "Дней", "Покупатель", "Цена продажи", "Прибыль"]
+                                    model: ["#", "Модель", "Инв. №", "Дата начала", "Дата продажи", "Дней", "Покупатель", "Себестоимость реальная", "Себестоимость налогоуплачиваемая", "Цена продажи", "Прибыль"]
                                     Rectangle {
-                                        width: index === 0 ? 50 : index === 1 ? 150 : index === 2 ? 100 : index === 3 ? 110 : index === 4 ? 120 : index === 5 ? 70 : index === 6 ? 150 : index === 7 ? 120 : 100
+                                        width: index === 0 ? 50 : index === 1 ? 150 : index === 2 ? 100 : index === 3 ? 110 : index === 4 ? 120 : index === 5 ? 70 : index === 6 ? 150 : index === 7 ? 150 : index === 8 ? 190 : index === 9 ? 120 : 100
                                         height: 30
                                         border.color: "#ccc"
                                         color: "transparent"
@@ -842,6 +845,20 @@ Page {
                                             font.pixelSize: 14
                                         }
                                         Text {
+                                            Layout.preferredWidth: 150
+                                            text: model.real_cost !== undefined ? model.real_cost.toFixed(2) + " руб." : "-"
+                                            horizontalAlignment: Text.AlignHCenter
+                                            verticalAlignment: Text.AlignVCenter
+                                            font.pixelSize: 14
+                                        }
+                                        Text {
+                                            Layout.preferredWidth: 190
+                                            text: model.taxable_cost !== undefined ? model.taxable_cost.toFixed(2) + " руб." : "-"
+                                            horizontalAlignment: Text.AlignHCenter
+                                            verticalAlignment: Text.AlignVCenter
+                                            font.pixelSize: 14
+                                        }
+                                        Text {
                                             Layout.preferredWidth: 120
                                             text: model.sale_price ? model.sale_price.toFixed(2) + " руб." : "-"
                                             horizontalAlignment: Text.AlignHCenter
@@ -880,6 +897,8 @@ Page {
                                             "produced_date": item.produced_date !== undefined ? item.produced_date : "",
                                             "start_date": item.start_date !== undefined ? item.start_date : "",
                                             "indirect_cost": item.indirect_cost !== undefined ? item.indirect_cost : 0,
+                                            "real_cost": item.real_cost !== undefined ? item.real_cost : 0,
+                                            "taxable_cost": item.taxable_cost !== undefined ? item.taxable_cost : 0,
                                             "sale_date": item.sale_date !== undefined ? item.sale_date : "",
                                             "days_to_sale": item.days_to_sale !== undefined ? item.days_to_sale : null,
                                             "buyer": item.buyer !== undefined ? item.buyer : "",
@@ -1012,6 +1031,8 @@ Page {
                                 "produced_date": item.produced_date !== undefined ? item.produced_date : "",
                                 "start_date": item.start_date !== undefined ? item.start_date : "",
                                 "indirect_cost": item.indirect_cost !== undefined ? item.indirect_cost : 0,
+                                "real_cost": item.real_cost !== undefined ? item.real_cost : 0,
+                                "taxable_cost": item.taxable_cost !== undefined ? item.taxable_cost : 0,
                                 "sale_date": item.sale_date !== undefined ? item.sale_date : "",
                                 "days_to_sale": item.days_to_sale !== undefined ? item.days_to_sale : null,
                                 "buyer": item.buyer !== undefined ? item.buyer : "",
@@ -1389,6 +1410,65 @@ Page {
             property int selectedMachineId: -1
             property string selectedMachineModel: ""
             property int selectedSpecRow: -1   // РЎРѓР Р†Р С•РЎвЂ РЎРѓР Р†Р С•Р в„–РЎРѓРЎвЂљР Р†Р С• Р Т‘Р В»РЎРЏ Р С•РЎвЂљРЎРѓР В»Р ВµР В¶Р С‘Р Р†Р В°Р Р…Р С‘РЎРЏ РЎРѓРЎвЂљРЎР‚Р С•Р С”Р С‘ Р Р† РЎРѓР С—Р ВµРЎвЂ Р С‘РЎвЂћР С‘Р С”Р В°РЎвЂ Р С‘Р С‘
+            property var allMaterialsForSpec: []
+
+            function refreshMachineSpec() {
+                specModel.refresh()
+                machineModel.refresh()
+                modelCountText.text = "Моделей станков: " + machineModel.rowCount()
+            }
+
+            function openEditQuantityDialog(rowIndex) {
+                if (rowIndex < 0) {
+                    return
+                }
+                var matId = specModel.getMaterialId(rowIndex)
+                var curQty = specModel.getQuantity(rowIndex)
+                if (matId <= 0) {
+                    return
+                }
+                selectedSpecRow = rowIndex
+                editQtyDialog.materialId = matId
+                editQtyDialog.currentQty = curQty
+                editQtyDialog.open()
+            }
+
+            function removeSpecMaterial(rowIndex) {
+                if (rowIndex < 0) {
+                    return
+                }
+                var matId = specModel.getMaterialId(rowIndex)
+                if (matId > 0) {
+                    backend.removeMaterialFromMachine(selectedMachineId, matId)
+                    selectedSpecRow = -1
+                    refreshMachineSpec()
+                }
+            }
+
+            function loadMaterialsForSpec() {
+                allMaterialsForSpec = backend.getMaterialsList()
+                filterMaterialsForSpec(materialSearchField.text)
+            }
+
+            function filterMaterialsForSpec(query) {
+                filteredMaterialsModel.clear()
+                var search = (query || "").toLowerCase().trim()
+                for (var i = 0; i < allMaterialsForSpec.length; i++) {
+                    var item = allMaterialsForSpec[i]
+                    var name = (item.name || "")
+                    if (!search || name.toLowerCase().indexOf(search) !== -1) {
+                        filteredMaterialsModel.append({
+                            "id": item.id,
+                            "name": item.name
+                        })
+                    }
+                }
+                if (filteredMaterialsModel.count > 0) {
+                    materialComboSpec.currentIndex = 0
+                } else {
+                    materialComboSpec.currentIndex = -1
+                }
+            }
 
             MachineListModel { id: machineModel }
             MachineSpecModel { id: specModel }
@@ -1565,8 +1645,29 @@ Page {
 
                             MouseArea {
                                 anchors.fill: parent
+                                acceptedButtons: Qt.LeftButton | Qt.RightButton
                                 onClicked: {
                                     tab3Root.selectedSpecRow = row
+                                }
+                                onPressed: function(mouse) {
+                                    if (mouse.button === Qt.RightButton) {
+                                        tab3Root.selectedSpecRow = row
+                                        specRowMenu.popup()
+                                    }
+                                }
+                            }
+
+                            Menu {
+                                id: specRowMenu
+
+                                MenuItem {
+                                    text: "Изменить количество"
+                                    onTriggered: tab3Root.openEditQuantityDialog(row)
+                                }
+
+                                MenuItem {
+                                    text: "Удалить материал"
+                                    onTriggered: tab3Root.removeSpecMaterial(row)
                                 }
                             }
                         }
@@ -1620,6 +1721,7 @@ Page {
                                 }
                             }
                         }
+                    }
 
                     Label {
                         visible: tab3Root.selectedMachineId > 0 && specModel.rowCount() === 0
@@ -1640,33 +1742,14 @@ Page {
                             text: "Изменить количество"
                             enabled: tab3Root.selectedSpecRow >= 0
                             highlighted: tab3Root.selectedSpecRow >= 0
-                            onClicked: {
-                                if (tab3Root.selectedSpecRow >= 0) {
-                                    var matId = specModel.getMaterialId(tab3Root.selectedSpecRow)
-                                    var curQty = specModel.getQuantity(tab3Root.selectedSpecRow)
-                                    editQtyDialog.materialId = matId
-                                    editQtyDialog.currentQty = curQty
-                                    editQtyDialog.open()
-                                }
-                            }
+                            onClicked: tab3Root.openEditQuantityDialog(tab3Root.selectedSpecRow)
                         }
 
                         Button {
                             text: "Удалить материал"
                             enabled: tab3Root.selectedSpecRow >= 0
                             highlighted: tab3Root.selectedSpecRow >= 0
-                            onClicked: {
-                                if (tab3Root.selectedSpecRow >= 0) {
-                                    var matId = specModel.getMaterialId(tab3Root.selectedSpecRow)
-                                    if (matId > 0) {
-                                        backend.removeMaterialFromMachine(tab3Root.selectedMachineId, matId)
-                                        tab3Root.selectedSpecRow = -1
-                                        specModel.refresh()
-                                        machineModel.refresh()
-                                        modelCountText.text = "Моделей станков: " + machineModel.rowCount()
-                                    }
-                                }
-                            }
+                            onClicked: tab3Root.removeSpecMaterial(tab3Root.selectedSpecRow)
                         }
                     }
                 }
@@ -1731,13 +1814,11 @@ Page {
                         font.bold: true
                     }
 
-                    Label { text: "Количество к производству:" }
-                    SpinBox {
-                        id: quantitySpinBox
+                    Label { text: "ID станка:" }
+                    TextField {
+                        id: productionInventoryNumberField
                         Layout.fillWidth: true
-                        from: 1
-                        to: 100
-                        value: 1
+                        placeholderText: "Введите ID или инвентарный номер"
                     }
 
                     Label { text: "Примечание к производству (необязательно):" }
@@ -1755,9 +1836,9 @@ Page {
                     }
                 }
                 onAccepted: {
-                    if (backend.startProduction(tab3Root.selectedMachineId, quantitySpinBox.value, productionNotesField.text)) {
+                    if (backend.startProduction(tab3Root.selectedMachineId, productionInventoryNumberField.text, productionNotesField.text)) {
+                        productionInventoryNumberField.clear()
                         productionNotesField.clear()
-                        quantitySpinBox.value = 1
                     }
                 }
             }
@@ -1767,14 +1848,21 @@ Page {
                 title: "Добавить материал"
                 standardButtons: Dialog.Ok | Dialog.Cancel
                 width: 500
-                height: 200
+                height: 280
                 ColumnLayout {
                     anchors.fill: parent
+                    Label { text: "Поиск по складу:" }
+                    TextField {
+                        id: materialSearchField
+                        Layout.fillWidth: true
+                        placeholderText: "Введите название материала..."
+                        onTextChanged: tab3Root.filterMaterialsForSpec(text)
+                    }
                     Label { text: "Материал:" }
                     ComboBox {
                         id: materialComboSpec
                         Layout.fillWidth: true
-                        model: backend.getMaterialsList()
+                        model: ListModel { id: filteredMaterialsModel }
                         textRole: "name"
                         valueRole: "id"
                     }
@@ -1785,12 +1873,14 @@ Page {
                         validator: DoubleValidator { bottom: 0.01 }
                     }
                 }
+                onOpened: {
+                    materialSearchField.clear()
+                    tab3Root.loadMaterialsForSpec()
+                }
                 onAccepted: {
                     if (materialComboSpec.currentValue && specQty.text) {
                         backend.addMaterialToMachine(tab3Root.selectedMachineId, materialComboSpec.currentValue, parseFloat(specQty.text))
-                        specModel.refresh()
-                        machineModel.refresh()
-                        modelCountText.text = "Моделей станков: " + machineModel.rowCount()
+                        tab3Root.refreshMachineSpec()
                         specQty.clear()
                     }
                 }
@@ -1817,9 +1907,7 @@ Page {
                 onAccepted: {
                     if (newQtyField.text) {
                         backend.updateMaterialInMachine(tab3Root.selectedMachineId, materialId, parseFloat(newQtyField.text))
-                        specModel.refresh()
-                        machineModel.refresh()
-                        modelCountText.text = "Моделей станков: " + machineModel.rowCount()
+                        tab3Root.refreshMachineSpec()
                     }
                 }
             }
@@ -1830,5 +1918,4 @@ Page {
             }
         }
     }
-}
 }

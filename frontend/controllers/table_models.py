@@ -389,7 +389,7 @@ class InProgressModel(QAbstractTableModel):
     def __init__(self):
         super().__init__()
         self._data = []
-        self._headers = ["ID", "Модель", "Дата начала", "Примечание"]
+        self._headers = ["ID", "Model", "Machine ID", "Start date", "Hours", "Indirect", "Total", "Notes"]
 
     def rowCount(self, parent=QModelIndex()):
         return len(self._data)
@@ -405,8 +405,12 @@ class InProgressModel(QAbstractTableModel):
         if role == Qt.DisplayRole:
             if col == 0: return str(row['id'])
             if col == 1: return row['model']
-            if col == 2: return row['date']
-            if col == 3: return row['notes']
+            if col == 2: return row['inventory_number'] or '-'
+            if col == 3: return row['date']
+            if col == 4: return f"{row['hours']:.2f}"
+            if col == 5: return f"{row['indirect_cost']:.2f}"
+            if col == 6: return f"{row['total_cost']:.2f}"
+            if col == 7: return row['notes']
         return None
 
     def headerData(self, section, orientation, role=Qt.DisplayRole):
@@ -425,15 +429,40 @@ class InProgressModel(QAbstractTableModel):
         self.beginResetModel()
         with get_connection() as conn:
             with conn.cursor() as cur:
+                cur.execute("ALTER TABLE IF EXISTS finished_goods ADD COLUMN IF NOT EXISTS inventory_number VARCHAR(50)")
+                cur.execute("ALTER TABLE IF EXISTS finished_goods ADD COLUMN IF NOT EXISTS start_date DATE")
+                cur.execute("ALTER TABLE IF EXISTS finished_goods ADD COLUMN IF NOT EXISTS indirect_cost DECIMAL(12, 2) DEFAULT 0")
                 cur.execute("""
-                    SELECT id, machine_model, produced_date, notes
-                    FROM finished_goods
-                    WHERE status = 'in_progress'
-                    ORDER BY produced_date DESC
+                    SELECT
+                        fg.id,
+                        fg.machine_model,
+                        fg.inventory_number,
+                        COALESCE(fg.start_date, fg.produced_date),
+                        COALESCE(fg.notes, ''),
+                        COALESCE((
+                            SELECT SUM(wl.hours)
+                            FROM finished_good_labor fgl
+                            JOIN work_logs wl ON wl.id = fgl.work_log_id
+                            WHERE fgl.finished_good_id = fg.id
+                        ), 0) AS total_hours,
+                        COALESCE(fg.indirect_cost, 0) AS indirect_cost,
+                        COALESCE(fg.cost_price, 0) AS total_cost
+                    FROM finished_goods fg
+                    WHERE fg.status = 'in_progress'
+                    ORDER BY COALESCE(fg.start_date, fg.produced_date) DESC, fg.id DESC
                 """)
                 rows = cur.fetchall()
                 self._data = [
-                    {'id': r[0], 'model': r[1], 'date': str(r[2]), 'notes': r[3] or ''}
+                    {
+                        'id': r[0],
+                        'model': r[1],
+                        'inventory_number': r[2] or '',
+                        'date': str(r[3]) if r[3] else '',
+                        'notes': r[4] or '',
+                        'hours': float(r[5]) if r[5] else 0.0,
+                        'indirect_cost': float(r[6]) if r[6] else 0.0,
+                        'total_cost': float(r[7]) if r[7] else 0.0,
+                    }
                     for r in rows
                 ]
         self.endResetModel()

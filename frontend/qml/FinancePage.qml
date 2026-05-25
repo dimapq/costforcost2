@@ -6,6 +6,16 @@ Page {
     title: "Финансы и аналитика"
     property bool compactLayout: width < 1180
     property int editCategoryId: -1
+    property string miscExpenseStatusMessage: ""
+
+    ListModel { id: miscExpenseMachineModel }
+    ListModel { id: miscExpenseListModel }
+    ListModel {
+        id: miscAssignModeModel
+        ListElement { label: "Без привязки"; value: "none" }
+        ListElement { label: "Выбранные станки"; value: "selected" }
+        ListElement { label: "Все станки"; value: "all" }
+    }
 
     ScrollView {
         id: scrollView
@@ -258,6 +268,244 @@ Page {
             }
 
             GroupBox {
+                title: "Прочие расходы"
+                Layout.fillWidth: true
+
+                GridLayout {
+                    anchors.fill: parent
+                    columns: compactLayout ? 1 : 2
+                    columnSpacing: 18
+                    rowSpacing: 18
+
+                    GroupBox {
+                        title: "Новый расход"
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 430
+
+                        ColumnLayout {
+                            anchors.fill: parent
+                            spacing: 10
+
+                            GridLayout {
+                                Layout.fillWidth: true
+                                columns: compactLayout ? 2 : 4
+                                columnSpacing: 8
+                                rowSpacing: 8
+
+                                Label { text: "Дата:" }
+                                TextField { id: miscExpenseDateField; Layout.preferredWidth: 120; placeholderText: "ГГГГ-ММ-ДД" }
+                                Label { text: "Сумма:" }
+                                TextField { id: miscExpenseAmountField; Layout.preferredWidth: 120; placeholderText: "0.00"; validator: DoubleValidator { bottom: 0.01 } }
+
+                                Label { text: "Название:" }
+                                TextField { id: miscExpenseTitleField; Layout.fillWidth: true; Layout.columnSpan: compactLayout ? 1 : 3; placeholderText: "Например: доставка, комиссия, упаковка" }
+
+                                Label { text: "Лицо:" }
+                                TextField { id: miscExpensePersonField; Layout.fillWidth: true; placeholderText: "Кому относится расход" }
+                                CheckBox { id: miscExpenseCash; text: "Наличка" }
+                                Item { visible: compactLayout }
+
+                                Label { text: "Привязка:" }
+                                ComboBox {
+                                    id: miscAssignModeCombo
+                                    Layout.fillWidth: true
+                                    Layout.columnSpan: compactLayout ? 1 : 3
+                                    model: miscAssignModeModel
+                                    textRole: "label"
+                                    valueRole: "value"
+                                }
+
+                                Label { text: "Примечание:" }
+                                TextField {
+                                    id: miscExpenseNotesField
+                                    Layout.fillWidth: true
+                                    Layout.columnSpan: compactLayout ? 1 : 3
+                                    placeholderText: "Дополнительная информация"
+                                }
+                            }
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                visible: miscAssignModeCombo.currentValue === "selected"
+                                color: "#f8fafc"
+                                border.color: "#d9e0e8"
+                                radius: 6
+                                implicitHeight: 215
+
+                                ColumnLayout {
+                                    anchors.fill: parent
+                                    anchors.margins: 10
+                                    spacing: 8
+
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        Label { text: "Выберите один или несколько станков"; font.bold: true; Layout.fillWidth: true }
+                                        Button {
+                                            text: "Все"
+                                            onClicked: {
+                                                for (var i = 0; i < miscExpenseMachineModel.count; i++)
+                                                    miscExpenseMachineModel.setProperty(i, "checked", true)
+                                            }
+                                        }
+                                        Button {
+                                            text: "Снять"
+                                            onClicked: {
+                                                for (var i = 0; i < miscExpenseMachineModel.count; i++)
+                                                    miscExpenseMachineModel.setProperty(i, "checked", false)
+                                            }
+                                        }
+                                    }
+
+                                    ScrollView {
+                                        Layout.fillWidth: true
+                                        Layout.fillHeight: true
+                                        clip: true
+
+                                        ListView {
+                                            id: miscExpenseMachineList
+                                            model: miscExpenseMachineModel
+                                            spacing: 4
+
+                                            delegate: Rectangle {
+                                                width: miscExpenseMachineList.width
+                                                height: 34
+                                                radius: 4
+                                                color: model.checked ? "#e8f3ff" : (index % 2 ? "#fafafa" : "white")
+                                                border.color: "#e4e7eb"
+
+                                                RowLayout {
+                                                    anchors.fill: parent
+                                                    anchors.leftMargin: 8
+                                                    anchors.rightMargin: 8
+                                                    spacing: 8
+
+                                                    CheckBox {
+                                                        checked: model.checked
+                                                        onToggled: miscExpenseMachineModel.setProperty(index, "checked", checked)
+                                                    }
+                                                    Label {
+                                                        Layout.fillWidth: true
+                                                        text: model.display
+                                                        elide: Text.ElideRight
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Button {
+                                    text: "Сохранить расход"
+                                    highlighted: true
+                                    onClicked: {
+                                        var mode = miscAssignModeCombo.currentValue || "none"
+                                        var selectedIds = []
+                                        if (mode === "selected")
+                                            selectedIds = selectedMiscExpenseIds()
+                                        var result = backend.addMiscExpense(
+                                            miscExpenseDateField.text,
+                                            miscExpenseTitleField.text,
+                                            parseFloat((miscExpenseAmountField.text || "0").replace(",", ".")),
+                                            miscExpenseCash.checked,
+                                            miscExpensePersonField.text,
+                                            miscExpenseNotesField.text,
+                                            mode,
+                                            selectedIds
+                                        )
+                                        miscExpenseStatusMessage = result.message || ""
+                                        if (result.ok) {
+                                            resetMiscExpenseForm()
+                                            reloadMiscExpenses()
+                                            updateDashboard()
+                                        }
+                                    }
+                                }
+                                Button {
+                                    text: "Обновить список"
+                                    onClicked: {
+                                        reloadMiscExpenseTargets()
+                                        reloadMiscExpenses()
+                                    }
+                                }
+                            }
+
+                            Label {
+                                Layout.fillWidth: true
+                                text: miscExpenseStatusMessage
+                                visible: text.length > 0
+                                wrapMode: Text.WordWrap
+                                color: miscExpenseStatusMessage.indexOf("Ошибка") >= 0 || miscExpenseStatusMessage.indexOf("Укажите") >= 0 || miscExpenseStatusMessage.indexOf("Выберите") >= 0 ? "#b94a48" : "#2f6f3e"
+                            }
+                        }
+                    }
+
+                    GroupBox {
+                        title: "Последние прочие расходы"
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 430
+
+                        ColumnLayout {
+                            anchors.fill: parent
+                            spacing: 8
+
+                            ListView {
+                                id: miscExpenseView
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                                clip: true
+                                spacing: 6
+                                model: miscExpenseListModel
+
+                                delegate: Rectangle {
+                                    width: miscExpenseView.width
+                                    height: compactLayout ? 112 : 76
+                                    radius: 4
+                                    color: index % 2 ? "#f9f9f9" : "white"
+                                    border.color: "#e4e7eb"
+
+                                    ColumnLayout {
+                                        anchors.fill: parent
+                                        anchors.margins: 8
+                                        spacing: 4
+
+                                        RowLayout {
+                                            Layout.fillWidth: true
+                                            Label { text: model.title; font.bold: true; Layout.fillWidth: true; elide: Text.ElideRight }
+                                            Label { text: Number(model.amount).toFixed(2) + " руб."; color: "#1d5f7a"; font.bold: true }
+                                            Label { text: model.is_cash ? "Наличка" : "Безнал"; color: model.is_cash ? "#8b5a00" : "#2a5f9e" }
+                                        }
+
+                                        RowLayout {
+                                            Layout.fillWidth: true
+                                            Label { text: model.date; color: "#666" }
+                                            Label { text: model.person_name ? ("Лицо: " + model.person_name) : "Лицо не указано"; color: "#666"; Layout.fillWidth: true; elide: Text.ElideRight }
+                                            Button {
+                                                text: "Удалить"
+                                                onClicked: {
+                                                    var result = backend.deleteMiscExpense(model.id)
+                                                    miscExpenseStatusMessage = result.message || ""
+                                                    if (result.ok) {
+                                                        reloadMiscExpenses()
+                                                        updateDashboard()
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        Label { text: model.target_summary; Layout.fillWidth: true; elide: Text.ElideRight; color: "#444" }
+                                        Label { text: model.notes || "Без примечания"; Layout.fillWidth: true; elide: Text.ElideRight; color: "#777" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            GroupBox {
                 title: "Косвенные расходы"
                 Layout.fillWidth: true
 
@@ -363,6 +611,7 @@ Page {
                                         TextField { id: indirectAmount; Layout.preferredWidth: 130; placeholderText: "0.00"; validator: DoubleValidator { bottom: 0.01 } }
 
                                         CheckBox { id: indirectActive; text: "Активна"; checked: true }
+                                        CheckBox { id: indirectCash; text: "Наличка" }
                                         TextField {
                                             id: indirectNote
                                             Layout.fillWidth: true
@@ -373,10 +622,11 @@ Page {
                                             text: "Добавить"
                                             onClicked: {
                                                 if (indirectName.text && indirectAmount.text) {
-                                                    backend.addIndirectCategory(indirectName.text, parseFloat(indirectAmount.text), indirectActive.checked, indirectNote.text)
+                                                    backend.addIndirectCategory(indirectName.text, parseFloat(indirectAmount.text), indirectActive.checked, indirectCash.checked, indirectNote.text)
                                                     indirectName.clear()
                                                     indirectAmount.clear()
                                                     indirectNote.clear()
+                                                    indirectCash.checked = false
                                                     reloadIndirect()
                                                 }
                                             }
@@ -408,6 +658,7 @@ Page {
                                                 Layout.fillWidth: true
                                                 Label { text: model.name; font.bold: true; Layout.fillWidth: true; elide: Text.ElideRight }
                                                 Label { text: Number(model.monthly_amount).toFixed(2) + " ₽"; color: "#1d5f7a" }
+                                                Label { text: model.is_cash ? "Наличка" : "Безнал"; color: model.is_cash ? "#8b5a00" : "#2a5f9e" }
                                                 Label { text: model.is_active ? "Активна" : "Пауза"; color: model.is_active ? "#2f6f3e" : "#a05a00" }
                                             }
 
@@ -421,6 +672,7 @@ Page {
                                                         editCategoryName.text = model.name
                                                         editCategoryAmount.text = Number(model.monthly_amount).toFixed(2)
                                                         editCategoryActive.checked = model.is_active
+                                                        editCategoryCash.checked = model.is_cash || false
                                                         editCategoryNote.text = model.notes || ""
                                                         editCategoryDialog.open()
                                                     }
@@ -514,6 +766,7 @@ Page {
             Label { text: "Сумма в месяц:" }
             TextField { id: editCategoryAmount; Layout.fillWidth: true; validator: DoubleValidator { bottom: 0.01 } }
             CheckBox { id: editCategoryActive; text: "Активна" }
+            CheckBox { id: editCategoryCash; text: "Наличка" }
             Label { text: "Примечание:" }
             TextField { id: editCategoryNote; Layout.fillWidth: true }
         }
@@ -525,11 +778,65 @@ Page {
                     editCategoryName.text,
                     parseFloat(editCategoryAmount.text),
                     editCategoryActive.checked,
+                    editCategoryCash.checked,
                     editCategoryNote.text
                 )
                 reloadIndirect()
             }
         }
+    }
+
+    function reloadMiscExpenseTargets() {
+        var rows = backend.getMiscExpenseMachineTargets()
+        miscExpenseMachineModel.clear()
+        for (var i = 0; i < rows.length; i++) {
+            var row = rows[i] || {}
+            miscExpenseMachineModel.append({
+                "id": row.id !== undefined ? row.id : -1,
+                "display": row.display !== undefined ? row.display : "",
+                "checked": false
+            })
+        }
+    }
+
+    function selectedMiscExpenseIds() {
+        var ids = []
+        for (var i = 0; i < miscExpenseMachineModel.count; i++) {
+            var row = miscExpenseMachineModel.get(i)
+            if (row.checked)
+                ids.push(row.id)
+        }
+        return ids
+    }
+
+    function reloadMiscExpenses() {
+        var rows = backend.getMiscExpenses()
+        miscExpenseListModel.clear()
+        for (var i = 0; i < rows.length; i++) {
+            var row = rows[i] || {}
+            miscExpenseListModel.append({
+                "id": row.id !== undefined ? row.id : -1,
+                "date": row.date !== undefined ? row.date : "",
+                "title": row.title !== undefined ? row.title : "",
+                "amount": row.amount !== undefined ? row.amount : 0,
+                "notes": row.notes !== undefined ? row.notes : "",
+                "is_cash": row.is_cash !== undefined ? row.is_cash : false,
+                "person_name": row.person_name !== undefined ? row.person_name : "",
+                "target_summary": row.target_summary !== undefined ? row.target_summary : ""
+            })
+        }
+    }
+
+    function resetMiscExpenseForm() {
+        miscExpenseDateField.text = Qt.formatDate(new Date(), "yyyy-MM-dd")
+        miscExpenseTitleField.clear()
+        miscExpenseAmountField.clear()
+        miscExpenseCash.checked = false
+        miscExpensePersonField.clear()
+        miscExpenseNotesField.clear()
+        miscAssignModeCombo.currentIndex = 0
+        for (var i = 0; i < miscExpenseMachineModel.count; i++)
+            miscExpenseMachineModel.setProperty(i, "checked", false)
     }
 
     function updateTaxReport() {
@@ -595,6 +902,7 @@ Page {
                 "name": c.name !== undefined ? c.name : "",
                 "monthly_amount": c.monthly_amount !== undefined ? c.monthly_amount : 0,
                 "is_active": c.is_active !== undefined ? c.is_active : false,
+                "is_cash": c.is_cash !== undefined ? c.is_cash : false,
                 "notes": c.notes !== undefined ? c.notes : ""
             })
         }
@@ -660,6 +968,9 @@ Page {
         indirectMonthField.text = year + "-" + month
         indirectFromField.text = year + "-" + month + "-01"
         indirectToField.text = year + "-" + month + "-" + String(lastDay).padStart(2, "0")
+        resetMiscExpenseForm()
+        reloadMiscExpenseTargets()
+        reloadMiscExpenses()
         updateDashboard()
         updateTaxReport()
         reloadIndirect()

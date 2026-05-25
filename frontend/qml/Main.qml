@@ -7,7 +7,7 @@ ApplicationWindow {
     visible: true
     width: 1200
     height: 800
-    title: "MachineCost Pro v1.2"
+    title: appTitle
 
     property bool connectionReady: false
     property string connectionMessage: ""
@@ -32,7 +32,7 @@ ApplicationWindow {
             }
 
             Label {
-                text: "MachineCost Pro v1.2"
+                text: appTitle
                 font.pixelSize: 16
                 font.bold: true
                 color: "#2f2f2f"
@@ -91,6 +91,12 @@ ApplicationWindow {
                 root.settingsActionPath = result.path || ""
                 settingsResultDialog.open()
             }
+        }
+        MenuSeparator { }
+
+        MenuItem {
+            text: "\u041f\u0440\u043e\u0432\u0435\u0440\u0438\u0442\u044c \u043e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u0438\u044f"
+            onTriggered: updateManager.checkForUpdates(true)
         }
     }
 
@@ -225,6 +231,140 @@ ApplicationWindow {
         }
     }
 
+
+    Popup {
+        id: updatePopup
+        modal: true
+        focus: true
+        x: Math.round((root.width - width) / 2)
+        y: Math.round((root.height - height) / 2)
+        width: Math.min(root.width - 40, 470)
+        padding: 16
+        closePolicy: updateManager.busy ? Popup.NoAutoClose : Popup.CloseOnEscape | Popup.CloseOnPressOutside
+
+        background: Rectangle {
+            radius: 12
+            color: "white"
+            border.color: "#d8dee7"
+        }
+
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 12
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 12
+
+                Image {
+                    source: updateLogoPath
+                    sourceSize.width: 72
+                    sourceSize.height: 72
+                    fillMode: Image.PreserveAspectFit
+                    Layout.preferredWidth: 72
+                    Layout.preferredHeight: 72
+                }
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 4
+
+                    Label {
+                        text: updateManager.busy
+                              ? "Обновление " + appTitle
+                              : (updateManager.updateAvailable
+                                 ? "Доступно обновление " + updateManager.latestVersion
+                                 : "Проверка обновлений")
+                        font.pixelSize: 20
+                        font.bold: true
+                        Layout.fillWidth: true
+                        wrapMode: Text.WordWrap
+                    }
+
+                    Label {
+                        text: "Текущая версия: " + appVersionLabel + (updateManager.latestVersion ? ("    Новая: v" + updateManager.latestVersion) : "")
+                        color: "#666"
+                        Layout.fillWidth: true
+                        wrapMode: Text.WordWrap
+                    }
+                }
+            }
+
+            Label {
+                text: updateManager.statusMessage
+                visible: text.length > 0
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                color: updateManager.statusMessage.indexOf("Ошибка") >= 0 ? "#b23b3b" : "#2f2f2f"
+            }
+
+            ProgressBar {
+                visible: updateManager.busy && updateManager.progress >= 0
+                Layout.fillWidth: true
+                from: 0
+                to: 100
+                value: Math.max(0, updateManager.progress)
+            }
+
+            Label {
+                text: updateManager.releaseNotes.length > 0 ? ("\u0427\u0442\u043e \u0438\u0437\u043c\u0435\u043d\u0438\u043b\u043e\u0441\u044c:\n" + updateManager.releaseNotes) : ""
+                visible: text.length > 0
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                color: "#555"
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                Item { Layout.fillWidth: true }
+
+                Button {
+                    text: "Закрыть"
+                    visible: !updateManager.busy && !updateManager.updateAvailable && updateManager.statusMessage.length > 0
+                    onClicked: {
+                        updateManager.dismissStatus()
+                        updatePopup.close()
+                    }
+                }
+
+                Button {
+                    text: "Позже"
+                    visible: updateManager.updateAvailable && !updateManager.busy
+                    onClicked: {
+                        updateManager.dismissStatus()
+                        updatePopup.close()
+                    }
+                }
+
+                Button {
+                    text: "Обновить сейчас"
+                    highlighted: true
+                    visible: updateManager.updateAvailable && !updateManager.busy
+                    onClicked: updateManager.downloadAndInstallUpdate()
+                }
+            }
+        }
+    }
+
+    Connections {
+        target: updateManager
+
+        function onBusyChanged() {
+            if (updateManager.busy)
+                updatePopup.open()
+        }
+
+        function onUpdateAvailableChanged() {
+            if (updateManager.updateAvailable)
+                updatePopup.open()
+        }
+
+        function onStatusMessageChanged() {
+            if (updateManager.statusMessage.length > 0)
+                updatePopup.open()
+        }
+    }
+
     Dialog {
         id: settingsResultDialog
         title: "Результат"
@@ -280,5 +420,7 @@ ApplicationWindow {
             root.connectionMessage = cfg.connection_confirmed ? "Не удалось подключиться. Проверьте параметры." : "Первое подключение: проверьте данные из config.ini."
             connectionDialog.open()
         }
+        if (updateManager.enabled)
+            updateManager.checkForUpdates(false)
     }
 }
