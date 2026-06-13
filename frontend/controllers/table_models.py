@@ -7,8 +7,9 @@ class MaterialTableModel(QAbstractTableModel):
     def __init__(self):
         super().__init__()
         self._data = []
-        self._extra_headers = ["Откуда взят", "Примечание", "Дата обновления"]
-        self._headers = ["ID", "Название", "Остаток", "Цена за ед.", "Сумма"]
+        self._category_filter = ""
+        self._extra_headers = ["Используется в", "Откуда взят", "Примечание", "Дата обновления"]
+        self._headers = ["ID", "Название", "Категория", "Остаток", "Цена за ед.", "Сумма"]
 
     def rowCount(self, parent=QModelIndex()):
         return len(self._data)
@@ -27,27 +28,33 @@ class MaterialTableModel(QAbstractTableModel):
             elif col == 1:
                 return row['name']
             elif col == 2:
-                return f"{row['quantity']:.2f}"
+                return row.get('category') or "Материалы"
             elif col == 3:
-                return f"{row['price']:.2f}" if row['price'] else "—"
+                return f"{row['quantity']:.2f}"
             elif col == 4:
-                return f"{row['total']:.2f}" if row['total'] else "—"
+                return f"{row['price']:.2f}" if row['price'] else "—"
             elif col == 5:
-                return row.get('source') or "-"
+                return f"{row['total']:.2f}" if row['total'] else "—"
             elif col == 6:
-                return row.get('notes') or "-"
+                return row.get('used_in') or "-"
             elif col == 7:
+                return row.get('source') or "-"
+            elif col == 8:
+                return row.get('notes') or "-"
+            elif col == 9:
                 return row.get('updated_date') or "-"
         return None
 
     def headerData(self, section, orientation, role=Qt.DisplayRole):
         if orientation == Qt.Horizontal and role == Qt.DisplayRole:
-            if section == 5:
-                return self._extra_headers[0]
             if section == 6:
-                return self._extra_headers[1]
+                return self._extra_headers[0]
             if section == 7:
+                return self._extra_headers[1]
+            if section == 8:
                 return self._extra_headers[2]
+            if section == 9:
+                return self._extra_headers[3]
             return self._headers[section]
         return None
 
@@ -57,6 +64,23 @@ class MaterialTableModel(QAbstractTableModel):
             return self._data[row]
         return {}
 
+    def _stock_state(self, quantity, enough_threshold):
+        qty = float(quantity or 0)
+        enough = float(enough_threshold or 3)
+        if enough <= 0:
+            enough = 3
+        if qty <= 0:
+            return "empty"
+        if qty < enough:
+            return "low"
+        return "enough"
+
+    @Slot(str)
+    def setCategoryFilter(self, category):
+        normalized = (category or "").strip()
+        self._category_filter = "" if normalized in ("", "Все") else normalized
+        self.refresh()
+
     @Slot()
     def refresh(self):
         self.beginResetModel()
@@ -65,43 +89,107 @@ class MaterialTableModel(QAbstractTableModel):
                 cur.execute("ALTER TABLE IF EXISTS materials ADD COLUMN IF NOT EXISTS source TEXT")
                 cur.execute("ALTER TABLE IF EXISTS materials ADD COLUMN IF NOT EXISTS notes TEXT")
                 cur.execute("ALTER TABLE IF EXISTS materials ADD COLUMN IF NOT EXISTS updated_date DATE DEFAULT CURRENT_DATE")
+                cur.execute("ALTER TABLE IF EXISTS materials ADD COLUMN IF NOT EXISTS low_stock_threshold DECIMAL(12, 3) DEFAULT 1")
+                cur.execute("ALTER TABLE IF EXISTS materials ADD COLUMN IF NOT EXISTS enough_stock_threshold DECIMAL(12, 3) DEFAULT 3")
+                cur.execute("ALTER TABLE IF EXISTS materials ADD COLUMN IF NOT EXISTS category VARCHAR(100) DEFAULT 'Материалы'")
+                cur.execute("ALTER TABLE IF EXISTS materials ADD COLUMN IF NOT EXISTS is_plate BOOLEAN DEFAULT FALSE")
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS composite_material_recipes (
+                        id SERIAL PRIMARY KEY,
+                        output_material_id INT NOT NULL UNIQUE REFERENCES materials(id) ON DELETE CASCADE,
+                        output_quantity DECIMAL(12, 4) NOT NULL DEFAULT 1,
+                        notes TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS material_conversions (
+                        id SERIAL PRIMARY KEY,
+                        source_material_id INT REFERENCES materials(id),
+                        source_purchase_id INT REFERENCES purchases(id),
+                        target_material_id INT REFERENCES materials(id),
+                        source_quantity DECIMAL(12, 4) NOT NULL DEFAULT 0,
+                        target_quantity DECIMAL(12, 4) NOT NULL DEFAULT 0,
+                        total_cost DECIMAL(12, 2) NOT NULL DEFAULT 0,
+                        notes TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
                 cur.execute("""
                     WITH latest_prices AS (
                         SELECT DISTINCT ON (material_id) material_id, price_per_unit
                         FROM purchases WHERE price_per_unit IS NOT NULL
                         ORDER BY material_id, purchase_date DESC
+                    ),
+                    used_in AS (
+                        SELECT
+                            mm.material_id,
+                            STRING_AGG(DISTINCT mach.model, ', ' ORDER BY mach.model) AS used_in
+                        FROM machine_materials mm
+                        JOIN machines mach ON mach.id = mm.machine_id
+                        GROUP BY mm.material_id
+                    ),
+                    composite_outputs AS (
+                        SELECT output_material_id AS material_id
+                        FROM composite_material_recipes
+                    ),
+                    converted_materials AS (
+                        SELECT DISTINCT target_material_id AS material_id
+                        FROM material_conversions
                     )
                     SELECT 
                         m.id,
                         m.name,
+                        COALESCE(
+                            NULLIF(m.category, ''),
+                            CASE
+                                WHEN co.material_id IS NOT NULL THEN 'Составные'
+                                WHEN COALESCE(m.is_plate, FALSE) = TRUE OR cm.material_id IS NOT NULL THEN 'Раскрой плит'
+                                ELSE 'Материалы'
+                            END
+                        ) AS category,
                         m.unit,
                         COALESCE(inv.quantity, 0) AS qty,
                         lp.price_per_unit,
                         COALESCE(lp.price_per_unit * inv.quantity, 0) AS total,
+                        COALESCE(ui.used_in, ''),
                         m.source,
                         m.notes,
-                        m.updated_date
+                        m.updated_date,
+                        COALESCE(m.low_stock_threshold, 1),
+                        COALESCE(m.enough_stock_threshold, 3)
                     FROM materials m
                     LEFT JOIN material_inventory inv ON m.id = inv.material_id
                     LEFT JOIN latest_prices lp ON m.id = lp.material_id
-                    WHERE COALESCE(inv.quantity, 0) > 0
+                    LEFT JOIN used_in ui ON m.id = ui.material_id
+                    LEFT JOIN composite_outputs co ON co.material_id = m.id
+                    LEFT JOIN converted_materials cm ON cm.material_id = m.id
                     ORDER BY m.name
                 """)
                 rows = cur.fetchall()
-                self._data = [
+                data = [
                     {
                         'id': r[0],
                         'name': r[1],
-                        'unit': r[2],
-                        'quantity': r[3],
-                        'price': r[4],
-                        'total': r[5],
-                        'source': r[6],
-                        'notes': r[7],
-                        'updated_date': str(r[8]) if r[8] else ''
+                        'category': r[2] or 'Материалы',
+                        'unit': r[3],
+                        'quantity': r[4],
+                        'price': r[5],
+                        'total': r[6],
+                        'used_in': r[7] or '',
+                        'source': r[8],
+                        'notes': r[9],
+                        'updated_date': str(r[10]) if r[10] else '',
+                        'low_stock_threshold': float(r[11] or 1),
+                        'enough_stock_threshold': float(r[12] or 3),
+                        'stock_state': self._stock_state(r[4], r[12])
                     }
                     for r in rows
                 ]
+                if self._category_filter:
+                    data = [row for row in data if (row.get('category') or '') == self._category_filter]
+                self._data = data
         self.endResetModel()
 
 class ToolsTableModel(QAbstractTableModel):

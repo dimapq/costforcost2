@@ -4,6 +4,33 @@ from backend.db.connection import get_connection
 from backend.models.machine import calculate_machine_cost_from_purchases
 from backend.models.tools import apply_tool_depreciation_for_production
 
+def _ensure_production_reservation_schema(cur):
+    cur.execute("ALTER TABLE IF EXISTS purchases ADD COLUMN IF NOT EXISTS is_cash BOOLEAN DEFAULT FALSE")
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS finished_good_material_consumptions (
+            id SERIAL PRIMARY KEY,
+            finished_good_id INT REFERENCES finished_goods(id) ON DELETE CASCADE,
+            material_id INT REFERENCES materials(id),
+            purchase_id INT REFERENCES purchases(id),
+            quantity DECIMAL(12, 4) NOT NULL DEFAULT 0,
+            amount DECIMAL(12, 2) NOT NULL DEFAULT 0,
+            is_cash BOOLEAN DEFAULT FALSE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS finished_good_material_reservations (
+            id SERIAL PRIMARY KEY,
+            finished_good_id INT REFERENCES finished_goods(id) ON DELETE CASCADE,
+            material_id INT REFERENCES materials(id),
+            purchase_id INT REFERENCES purchases(id),
+            quantity DECIMAL(12, 4) NOT NULL DEFAULT 0,
+            amount DECIMAL(12, 2) NOT NULL DEFAULT 0,
+            is_cash BOOLEAN DEFAULT FALSE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
 def _consume_material_fifo(cur, material_id, required_qty, finished_good_id=None):
     required_qty = Decimal(str(required_qty or 0))
     if required_qty <= 0:
@@ -342,19 +369,7 @@ def start_production_gui(machine_id, inventory_number, notes):
             cur.execute("ALTER TABLE IF EXISTS finished_goods ADD COLUMN IF NOT EXISTS start_date DATE")
             cur.execute("ALTER TABLE IF EXISTS finished_goods ADD COLUMN IF NOT EXISTS indirect_cost DECIMAL(12, 2) DEFAULT 0")
             cur.execute("ALTER TABLE IF EXISTS finished_goods ADD COLUMN IF NOT EXISTS inventory_number VARCHAR(50)")
-            cur.execute("ALTER TABLE IF EXISTS purchases ADD COLUMN IF NOT EXISTS is_cash BOOLEAN DEFAULT FALSE")
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS finished_good_material_consumptions (
-                    id SERIAL PRIMARY KEY,
-                    finished_good_id INT REFERENCES finished_goods(id) ON DELETE CASCADE,
-                    material_id INT REFERENCES materials(id),
-                    purchase_id INT REFERENCES purchases(id),
-                    quantity DECIMAL(12, 4) NOT NULL DEFAULT 0,
-                    amount DECIMAL(12, 2) NOT NULL DEFAULT 0,
-                    is_cash BOOLEAN DEFAULT FALSE,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
+            _ensure_production_reservation_schema(cur)
             cur.execute("SELECT model FROM machines WHERE id = %s", (machine_id,))
             row = cur.fetchone()
             if not row:
@@ -415,19 +430,7 @@ def complete_machine_with_material_deduction(finished_good_id, inventory_number=
     """
     with get_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute("ALTER TABLE IF EXISTS purchases ADD COLUMN IF NOT EXISTS is_cash BOOLEAN DEFAULT FALSE")
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS finished_good_material_consumptions (
-                    id SERIAL PRIMARY KEY,
-                    finished_good_id INT REFERENCES finished_goods(id) ON DELETE CASCADE,
-                    material_id INT REFERENCES materials(id),
-                    purchase_id INT REFERENCES purchases(id),
-                    quantity DECIMAL(12, 4) NOT NULL DEFAULT 0,
-                    amount DECIMAL(12, 2) NOT NULL DEFAULT 0,
-                    is_cash BOOLEAN DEFAULT FALSE,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
+            _ensure_production_reservation_schema(cur)
             # 1. РџРѕР»СѓС‡Р°РµРј РґР°РЅРЅС‹Рµ Рѕ СЃС‚Р°РЅРєРµ
             cur.execute("""
                 SELECT machine_id, machine_model
@@ -440,43 +443,55 @@ def complete_machine_with_material_deduction(finished_good_id, inventory_number=
                 return False
             machine_id, model = row
 
-            # 2. РџСЂРѕРІРµСЂСЏРµРј РЅР°Р»РёС‡РёРµ РјР°С‚РµСЂРёР°Р»РѕРІ (РёСЃРїСЂР°РІР»РµРЅРЅС‹Р№ Р·Р°РїСЂРѕСЃ)
+            # 2. Проверяем, что все материалы уже зарезервированы для этого станка.
             cur.execute("""
-                SELECT m.name, mm.quantity, COALESCE(inv.quantity, 0) AS available
+                SELECT
+                    m.name,
+                    COALESCE(mm.quantity, 0) AS required_qty,
+                    COALESCE(SUM(r.quantity), 0) AS reserved_qty
                 FROM machine_materials mm
                 JOIN materials m ON mm.material_id = m.id
-                LEFT JOIN material_inventory inv ON mm.material_id = inv.material_id
+                LEFT JOIN finished_good_material_reservations r
+                    ON r.finished_good_id = %s AND r.material_id = mm.material_id
                 WHERE mm.machine_id = %s
-                  AND COALESCE(inv.quantity, 0) < mm.quantity
-            """, (machine_id,))
+                GROUP BY m.name, mm.quantity
+                HAVING COALESCE(SUM(r.quantity), 0) < COALESCE(mm.quantity, 0)
+            """, (finished_good_id, machine_id))
             shortages = cur.fetchall()
             if shortages:
-                print("РќРµРґРѕСЃС‚Р°С‚РѕС‡РЅРѕ РјР°С‚РµСЂРёР°Р»РѕРІ:")
-                for name, req, avail in shortages:
-                    print(f"  - {name}: С‚СЂРµР±СѓРµС‚СЃСЏ {req}, РІ РЅР°Р»РёС‡РёРё {avail}")
+                print("Не все материалы зарезервированы:")
+                for name, req, reserved in shortages:
+                    print(f"  - {name}: требуется {req}, в резерве {reserved}")
                 return False
 
-            # 3. РЎРїРёСЃС‹РІР°РµРј РјР°С‚РµСЂРёР°Р»С‹ Рё СЃС‡РёС‚Р°РµРј СЃС‚РѕРёРјРѕСЃС‚СЊ РјР°С‚РµСЂРёР°Р»РѕРІ
+            # 3. Переносим зарезервированные материалы в фактическое потребление.
             material_cost = Decimal('0.00')
-            # РСЃРїРѕР»СЊР·СѓРµРј РїРѕСЃР»РµРґРЅСЋСЋ С†РµРЅСѓ (СѓРїСЂРѕС‰С‘РЅРЅРѕ)
             cur.execute("""
-                SELECT mm.material_id, mm.quantity
-                FROM machine_materials mm
-                WHERE mm.machine_id = %s
-            """, (machine_id,))
-            for mat_id, qty in cur.fetchall():
-                # РЎРїРёСЃС‹РІР°РµРј СЃ РѕСЃС‚Р°С‚РєРѕРІ
+                SELECT material_id, purchase_id, quantity, amount, COALESCE(is_cash, FALSE)
+                FROM finished_good_material_reservations
+                WHERE finished_good_id = %s
+                ORDER BY id
+            """, (finished_good_id,))
+            reservation_rows = cur.fetchall()
+            material_totals = {}
+            for mat_id, purchase_id, qty, amount, is_cash in reservation_rows:
+                qty = Decimal(str(qty or 0))
+                amount = Decimal(str(amount or 0))
+                material_cost += amount
+                material_totals[mat_id] = material_totals.get(mat_id, Decimal("0")) + qty
                 cur.execute("""
-                    UPDATE material_inventory
-                    SET quantity = quantity - %s
-                    WHERE material_id = %s
-                """, (qty, mat_id))
-                # Р—Р°РїРёСЃСЊ С‚СЂР°РЅР·Р°РєС†РёРё
+                    INSERT INTO finished_good_material_consumptions
+                        (finished_good_id, material_id, purchase_id, quantity, amount, is_cash)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                """, (finished_good_id, mat_id, purchase_id, qty, amount, bool(is_cash)))
+
+            for mat_id, qty in material_totals.items():
                 cur.execute("""
                     INSERT INTO material_transactions (material_id, quantity_change, transaction_type, reference_id)
                     VALUES (%s, %s, 'production', %s)
                 """, (mat_id, -qty, finished_good_id))
-                material_cost += _consume_material_fifo(cur, mat_id, qty, finished_good_id=finished_good_id)
+
+            cur.execute("DELETE FROM finished_good_material_reservations WHERE finished_good_id = %s", (finished_good_id,))
 
             # 4. РЈС‡РёС‚С‹РІР°РµРј С‚СЂСѓРґРѕР·Р°С‚СЂР°С‚С‹ (С„Р°РєС‚РёС‡РµСЃРєРёРµ С‡Р°СЃС‹)
             cur.execute("""

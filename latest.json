@@ -1,6 +1,6 @@
 {
-  "version": "1.3.0",
+  "version": "1.4.0",
   "url": "https://github.com/dimapq/costforcost2/releases/latest/download/MachineCostPro.zip",
-  "notes": "????? v1.3. ????????? ??????????????, updater ? ?????????? ??????.",
-  "sha256": "23d9662e0b6dfdb5bb8e21f73fa8a87934afc0d160b1310c4bea72dd1876c64a"
+  "notes": "Release v1.4. Includes current fixes, updated packaging, and refresh for the auto-update channel.",
+  "sha256": "290dac3a3f7af46aaa8fc8b8eb68c1e2b66cb9ae938fb7f87223abc4009ec8d5"
 }

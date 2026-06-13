@@ -193,6 +193,47 @@ class BackendController(QObject):
                 cur.execute("ALTER TABLE IF EXISTS plate_part_templates ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE")
             conn.commit()
 
+    def _ensure_material_reservation_schema(self, cur):
+        cur.execute("ALTER TABLE IF EXISTS purchases ADD COLUMN IF NOT EXISTS is_cash BOOLEAN DEFAULT FALSE")
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS finished_good_material_reservations (
+                id SERIAL PRIMARY KEY,
+                finished_good_id INT REFERENCES finished_goods(id) ON DELETE CASCADE,
+                material_id INT REFERENCES materials(id),
+                purchase_id INT REFERENCES purchases(id),
+                quantity DECIMAL(12, 4) NOT NULL DEFAULT 0,
+                amount DECIMAL(12, 2) NOT NULL DEFAULT 0,
+                is_cash BOOLEAN DEFAULT FALSE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+    def _ensure_composite_materials_schema(self, cur):
+        cur.execute("ALTER TABLE IF EXISTS materials ADD COLUMN IF NOT EXISTS source TEXT")
+        cur.execute("ALTER TABLE IF EXISTS materials ADD COLUMN IF NOT EXISTS notes TEXT")
+        cur.execute("ALTER TABLE IF EXISTS materials ADD COLUMN IF NOT EXISTS updated_date DATE DEFAULT CURRENT_DATE")
+        cur.execute("ALTER TABLE IF EXISTS materials ADD COLUMN IF NOT EXISTS category VARCHAR(100) DEFAULT 'Материалы'")
+        cur.execute("ALTER TABLE IF EXISTS materials ADD COLUMN IF NOT EXISTS low_stock_threshold DECIMAL(12, 3) DEFAULT 1")
+        cur.execute("ALTER TABLE IF EXISTS materials ADD COLUMN IF NOT EXISTS enough_stock_threshold DECIMAL(12, 3) DEFAULT 3")
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS composite_material_recipes (
+                id SERIAL PRIMARY KEY,
+                output_material_id INT NOT NULL UNIQUE REFERENCES materials(id) ON DELETE CASCADE,
+                output_quantity DECIMAL(12, 4) NOT NULL DEFAULT 1,
+                notes TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS composite_material_recipe_items (
+                id SERIAL PRIMARY KEY,
+                recipe_id INT NOT NULL REFERENCES composite_material_recipes(id) ON DELETE CASCADE,
+                material_id INT NOT NULL REFERENCES materials(id),
+                quantity DECIMAL(12, 4) NOT NULL DEFAULT 0
+            )
+        """)
+
     def _read_plate_template_file(self, source_path):
         clean_source = (source_path or "").strip()
         if not clean_source:
@@ -203,28 +244,28 @@ class BackendController(QObject):
                 return {"path": clean_source, "name": Path(clean_source).name, "data": None}
             return {"path": clean_source, "name": source.name, "data": source.read_bytes()}
         except Exception as e:
-            print(f"?????? ?????? ????? ???????: {e}")
+            print(f"Error reading template file: {e}")
             return {"path": clean_source, "name": Path(clean_source).name if clean_source else "", "data": None}
 
     def _export_plate_template_file(self, binary_data, fallback_path, fallback_name, target_path):
         save_target = (target_path or "").strip()
         if not save_target:
-            return {"ok": False, "message": "?? ?????? ???? ??? ?????????? ?????."}
+            return {"ok": False, "message": "No export path specified."}
         try:
             destination = Path(save_target)
             destination.parent.mkdir(parents=True, exist_ok=True)
             if binary_data is not None:
                 destination.write_bytes(bytes(binary_data))
-                return {"ok": True, "message": f"???? ????????: {destination}", "path": str(destination)}
+                return {"ok": True, "message": f"File exported: {destination}", "path": str(destination)}
             clean_fallback = (fallback_path or "").strip()
             if clean_fallback:
                 source = Path(clean_fallback)
                 if source.exists() and source.is_file():
                     shutil.copy2(source, destination)
-                    return {"ok": True, "message": f"???? ????????: {destination}", "path": str(destination)}
-            return {"ok": False, "message": f"???? '{fallback_name or destination.name}' ?? ?????? ? ???? ??????."}
+                    return {"ok": True, "message": f"File exported: {destination}", "path": str(destination)}
+            return {"ok": False, "message": f"File '{fallback_name or destination.name}' was not found and no binary data is available."}
         except Exception as e:
-            return {"ok": False, "message": f"?????? ?????????? ?????: {e}"}
+            return {"ok": False, "message": f"Error exporting file: {e}"}
 
     def _log_operation(self, operation_type, description, amount=None, details=None, operation_dt=None):
         try:
@@ -617,14 +658,14 @@ class BackendController(QObject):
                 y += 1
                 m = 1
 
-    # ---------- РЎС‚Р°РЅРєРё ----------
+    # ---------- Станки ----------
     @Slot(str, result=str)
     def calculate_cost(self, machine_id):
         try:
             cost = calculate_machine_cost_from_purchases(int(machine_id))
             return f"{cost:.2f}"
         except Exception as e:
-            print(f"РћС€РёР±РєР° СЂР°СЃС‡С‘С‚Р° СЃС‚РѕРёРјРѕСЃС‚Рё: {e}")
+            print(f"Ошибка расчёта стоимости: {e}")
             return "0.00"
 
     @Slot(result="QVariantList")
@@ -632,7 +673,7 @@ class BackendController(QObject):
         machines = list_machines()
         return [{"id": m[0], "model": m[1], "cost": float(m[2]) if m[2] else 0.0} for m in machines]
 
-    # ---------- РЎРѕС‚СЂСѓРґРЅРёРєРё ----------
+    # ---------- Сотрудники ----------
     @Slot(result="QVariantList")
     def getEmployeesList(self):
         with get_connection() as conn:
@@ -655,7 +696,7 @@ class BackendController(QObject):
                 )
             return ok
         except Exception as e:
-            print(f"РћС€РёР±РєР° РґРѕР±Р°РІР»РµРЅРёСЏ СЃРѕС‚СЂСѓРґРЅРёРєР°: {e}")
+            print(f"Ошибка добавления сотрудника: {e}")
             return False
 
     @Slot(int, str, float, str, bool, result=bool)
@@ -677,7 +718,7 @@ class BackendController(QObject):
             )
             return True
         except Exception as e:
-            print(f"РћС€РёР±РєР° РѕР±РЅРѕРІР»РµРЅРёСЏ СЃРѕС‚СЂСѓРґРЅРёРєР°: {e}")
+            print(f"Ошибка обновления сотрудника: {e}")
             return False
 
     @Slot(int, result=bool)
@@ -701,7 +742,7 @@ class BackendController(QObject):
                 )
             return True
         except Exception as e:
-            print(f"РћС€РёР±РєР° РёР·РјРµРЅРµРЅРёСЏ СЃС‚Р°С‚СѓСЃР°: {e}")
+            print(f"Ошибка изменения статуса: {e}")
             return False
 
     @Slot(int, result="QVariantMap")
@@ -1021,7 +1062,7 @@ class BackendController(QObject):
             print(f"Ошибка удаления взаиморасчёта сотрудника: {e}")
             return {"ok": False, "message": f"Ошибка удаления записи: {e}"}
 
-    # ---------- Р“РѕС‚РѕРІС‹Рµ СЃС‚Р°РЅРєРё ----------
+    # ---------- Готовые станки ----------
     @Slot(result="QVariantList")
     def getFinishedGoodsList(self):
         with get_connection() as conn:
@@ -1311,10 +1352,10 @@ class BackendController(QObject):
             )
             return True
         except Exception as e:
-            print(f"РћС€РёР±РєР° Р·Р°РїРёСЃРё С‡Р°СЃРѕРІ: {e}")
+            print(f"Ошибка записи часов: {e}")
             return False
 
-    # ---------- РЎРєР»Р°РґСЃРєРёРµ СЃРІРѕРґРєРё ----------
+    # ---------- Складские сводки ----------
     @Slot(result=str)
     def getMaterialsSummary(self):
         try:
@@ -1352,16 +1393,24 @@ class BackendController(QObject):
                 })
             return result
         except Exception as e:
-            print(f"?????? ????????? ????????? ????????: {e}")
+            print(f"Error loading materials list: {e}")
             return []
 
-    # ---------- РњР°С‚РµСЂРёР°Р»С‹ ----------
-    @Slot(str, str, float, float, str, str, str, bool, result=bool)
-    def addMaterial(self, name, unit, price, quantity, source, notes, updated_date_str, is_cash):
+    # ---------- Материалы ----------
+    @Slot(str, str, float, float, str, str, str, bool, float, float, result=bool)
+    def addMaterial(self, name, unit, price, quantity, source, notes, updated_date_str, is_cash, low_stock_threshold, enough_stock_threshold):
         try:
             price_decimal = Decimal(str(price))
             quantity_decimal = Decimal(str(quantity))
             total_amount = price_decimal * quantity_decimal
+            low_threshold_decimal = Decimal(str(low_stock_threshold or 1))
+            enough_threshold_decimal = Decimal(str(enough_stock_threshold or 3))
+            if low_threshold_decimal < 0:
+                low_threshold_decimal = Decimal("1")
+            if enough_threshold_decimal <= 0:
+                enough_threshold_decimal = Decimal("3")
+            if enough_threshold_decimal < low_threshold_decimal:
+                enough_threshold_decimal = low_threshold_decimal
             from datetime import datetime, date
             updated_date = datetime.strptime(updated_date_str, "%Y-%m-%d").date() if updated_date_str else date.today()
             with get_connection() as conn:
@@ -1369,18 +1418,24 @@ class BackendController(QObject):
                     cur.execute("ALTER TABLE IF EXISTS materials ADD COLUMN IF NOT EXISTS source TEXT")
                     cur.execute("ALTER TABLE IF EXISTS materials ADD COLUMN IF NOT EXISTS notes TEXT")
                     cur.execute("ALTER TABLE IF EXISTS materials ADD COLUMN IF NOT EXISTS updated_date DATE DEFAULT CURRENT_DATE")
+                    cur.execute("ALTER TABLE IF EXISTS materials ADD COLUMN IF NOT EXISTS category VARCHAR(100) DEFAULT 'Материалы'")
+                    cur.execute("ALTER TABLE IF EXISTS materials ADD COLUMN IF NOT EXISTS low_stock_threshold DECIMAL(12, 3) DEFAULT 1")
+                    cur.execute("ALTER TABLE IF EXISTS materials ADD COLUMN IF NOT EXISTS enough_stock_threshold DECIMAL(12, 3) DEFAULT 3")
                     cur.execute("ALTER TABLE IF EXISTS purchases ADD COLUMN IF NOT EXISTS is_cash BOOLEAN DEFAULT FALSE")
                     cur.execute("ALTER TABLE IF EXISTS balance ADD COLUMN IF NOT EXISTS is_cash BOOLEAN DEFAULT FALSE")
                     cur.execute("""
-                        INSERT INTO materials (name, unit, source, notes, updated_date)
-                        VALUES (%s, %s, NULLIF(%s, ''), NULLIF(%s, ''), %s)
+                        INSERT INTO materials (name, unit, category, source, notes, updated_date, low_stock_threshold, enough_stock_threshold)
+                        VALUES (%s, %s, 'Материалы', NULLIF(%s, ''), NULLIF(%s, ''), %s, %s, %s)
                         ON CONFLICT (name) DO UPDATE SET
                             unit = EXCLUDED.unit,
+                            category = EXCLUDED.category,
                             source = COALESCE(EXCLUDED.source, materials.source),
                             notes = COALESCE(EXCLUDED.notes, materials.notes),
-                            updated_date = EXCLUDED.updated_date
+                            updated_date = EXCLUDED.updated_date,
+                            low_stock_threshold = EXCLUDED.low_stock_threshold,
+                            enough_stock_threshold = EXCLUDED.enough_stock_threshold
                         RETURNING id
-                    """, (name, unit, source, notes, updated_date))
+                    """, (name, unit, source, notes, updated_date, low_threshold_decimal, enough_threshold_decimal))
                     mat_id = cur.fetchone()[0]
                     cur.execute("""
                         INSERT INTO purchases (material_id, price_per_unit, quantity, remaining_quantity, purchase_date, notes, is_cash)
@@ -1427,7 +1482,7 @@ class BackendController(QObject):
                     rows = cur.fetchall()
             return [{"id": row[0], "name": row[1]} for row in rows]
         except Exception as e:
-            print(f"?????? ????????? ????? ????: {e}")
+            print(f"Error loading plate material types: {e}")
             return []
 
     @Slot(result="QVariantList")
@@ -1476,7 +1531,7 @@ class BackendController(QObject):
                 for row in rows
             ]
         except Exception as e:
-            print(f"?????? ????????? ???????? ???????: {e}")
+            print(f"Error loading plate part templates: {e}")
             return []
 
     @Slot(str, int, str, int, str, str, str, result="QVariantMap")
@@ -1484,9 +1539,9 @@ class BackendController(QObject):
         try:
             clean_name = (name or "").strip()
             if not clean_name:
-                return {"ok": False, "message": "??????? ???????? ??????."}
+                return {"ok": False, "message": "Enter template name."}
             if int(material_type_id or 0) <= 0:
-                return {"ok": False, "message": "???????? ???????? ??????."}
+                return {"ok": False, "message": "Select plate material type."}
             self._ensure_plate_cutting_schema()
             unit = (part_unit or "\u0448\u0442").strip() or "\u0448\u0442"
             minutes = max(0, int(production_minutes or 0))
@@ -1527,14 +1582,14 @@ class BackendController(QObject):
                     template_id = cur.fetchone()[0]
                     conn.commit()
             self._log_operation(
-                "??????? ????",
-                f"???????? ?????? ??????: {clean_name}",
-                details=f"?????? ID {template_id}, ???????? ID {material_type_id}, ?????: {minutes} ???."
+                "Plate cutting",
+                f"Plate part template saved: {clean_name}",
+                details=f"Template ID {template_id}, material type ID {material_type_id}, time: {minutes} min."
             )
-            return {"ok": True, "message": "?????? ?????? ????????.", "id": int(template_id)}
+            return {"ok": True, "message": "Part template saved.", "id": int(template_id)}
         except Exception as e:
-            print(f"?????? ?????????? ??????? ??????: {e}")
-            return {"ok": False, "message": f"?????? ?????????? ???????: {e}", "id": -1}
+            print(f"Error saving plate part template: {e}")
+            return {"ok": False, "message": f"Error saving template: {e}", "id": -1}
 
     @Slot(int, str, result="QVariantMap")
     def exportPlateTemplateDrawingFile(self, template_id, target_path):
@@ -1549,10 +1604,10 @@ class BackendController(QObject):
                     """, (template_id,))
                     row = cur.fetchone()
             if not row:
-                return {"ok": False, "message": "?????? ?????? ?? ??????."}
+                return {"ok": False, "message": "Template not found."}
             return self._export_plate_template_file(row[0], row[1], row[2], target_path)
         except Exception as e:
-            return {"ok": False, "message": f"?????? ???????? ???????: {e}"}
+            return {"ok": False, "message": f"Error exporting drawing file: {e}"}
 
     @Slot(int, str, result="QVariantMap")
     def exportPlateTemplateProcessFile(self, template_id, target_path):
@@ -1567,10 +1622,10 @@ class BackendController(QObject):
                     """, (template_id,))
                     row = cur.fetchone()
             if not row:
-                return {"ok": False, "message": "?????? ?????? ?? ??????."}
+                return {"ok": False, "message": "Template not found."}
             return self._export_plate_template_file(row[0], row[1], row[2], target_path)
         except Exception as e:
-            return {"ok": False, "message": f"?????? ???????? ????? ?????????: {e}"}
+            return {"ok": False, "message": f"Error exporting process file: {e}"}
 
     @Slot(int, result="QVariantMap")
     def deletePlatePartTemplate(self, template_id):
@@ -1688,10 +1743,11 @@ class BackendController(QObject):
                     cur.execute("ALTER TABLE IF EXISTS purchases ADD COLUMN IF NOT EXISTS is_cash BOOLEAN DEFAULT FALSE")
                     cur.execute("ALTER TABLE IF EXISTS balance ADD COLUMN IF NOT EXISTS is_cash BOOLEAN DEFAULT FALSE")
                     cur.execute("""
-                        INSERT INTO materials (name, unit, source, notes, updated_date, is_plate, plate_material_type_id)
-                        VALUES (%s, %s, NULLIF(%s, ''), NULLIF(%s, ''), %s, TRUE, %s)
+                        INSERT INTO materials (name, unit, category, source, notes, updated_date, is_plate, plate_material_type_id)
+                        VALUES (%s, %s, 'Раскрой плит', NULLIF(%s, ''), NULLIF(%s, ''), %s, TRUE, %s)
                         ON CONFLICT (name) DO UPDATE SET
                             unit = EXCLUDED.unit,
+                            category = EXCLUDED.category,
                             source = COALESCE(EXCLUDED.source, materials.source),
                             notes = COALESCE(EXCLUDED.notes, materials.notes),
                             updated_date = EXCLUDED.updated_date,
@@ -1713,35 +1769,35 @@ class BackendController(QObject):
                         VALUES (CURRENT_DATE, %s, %s, %s)
                     """, (
                         total_amount,
-                        f"??????? ?????: {material_name} ({quantity_decimal} ?? x {price_decimal})",
+                        f"Plate material purchase: {material_name} ({quantity_decimal} pcs x {price_decimal})",
                         bool(is_cash)
                     ))
                     conn.commit()
             self._log_operation(
-                "??????? ????",
-                f"????????? ?????: {material_name}",
+                "Plate cutting",
+                f"Plate added: {material_name}",
                 amount=total_amount,
-                details=f"????????: {material_type_name}, ??????????: {quantity_decimal} ??"
+                details=f"Material: {material_type_name}, quantity: {quantity_decimal} pcs"
             )
             return True
         except Exception as e:
-            print(f"?????? ?????????? ?????: {e}")
+            print(f"Error adding plate: {e}")
             return False
 
     @Slot(int, int, float, float, str, str, result="QVariantMap")
     def convertPlateLotToTemplate(self, purchase_id, template_id, area_qty, part_qty, updated_date_str, notes):
         try:
             if purchase_id <= 0 or template_id <= 0:
-                return {"ok": False, "message": "???????? ?????? ? ?????."}
+                return {"ok": False, "message": "Select a plate lot and a template."}
             self._ensure_plate_cutting_schema()
             area = Decimal(str(area_qty or 0))
             quantity = Decimal(str(part_qty or 1))
             from datetime import datetime, date
             updated_date = datetime.strptime(updated_date_str, "%Y-%m-%d").date() if updated_date_str else date.today()
             if area <= 0:
-                return {"ok": False, "message": "??????? ???????? ?????? ???? ?????? ????."}
+                return {"ok": False, "message": "Write-off area must be greater than zero."}
             if quantity <= 0:
-                return {"ok": False, "message": "?????????? ??????? ?????? ???? ?????? ????."}
+                return {"ok": False, "message": "Output quantity must be greater than zero."}
             with get_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute("""
@@ -1789,10 +1845,11 @@ class BackendController(QObject):
                     unit_price = (total_cost / quantity).quantize(Decimal("0.01"))
                     target_notes = (notes or "").strip() or template_notes or f"Деталь по шаблону: {template_name}"
                     cur.execute("""
-                        INSERT INTO materials (name, unit, source, notes, updated_date, is_plate, plate_material_type_id)
-                        VALUES (%s, %s, %s, %s, %s, FALSE, NULL)
+                        INSERT INTO materials (name, unit, category, source, notes, updated_date, is_plate, plate_material_type_id)
+                        VALUES (%s, %s, 'Раскрой плит', %s, %s, %s, FALSE, NULL)
                         ON CONFLICT (name) DO UPDATE SET
                             unit = EXCLUDED.unit,
+                            category = EXCLUDED.category,
                             source = EXCLUDED.source,
                             notes = COALESCE(EXCLUDED.notes, materials.notes),
                             updated_date = EXCLUDED.updated_date
@@ -1875,7 +1932,7 @@ class BackendController(QObject):
             quick_add_product(url, notes=url)
             return True
         except Exception as e:
-            print(f"РћС€РёР±РєР° РїР°СЂСЃРёРЅРіР°: {e}")
+            print(f"Ошибка парсинга: {e}")
             return False
 
     @Slot(int, float, str, result=bool)
@@ -1908,16 +1965,355 @@ class BackendController(QObject):
             )
             return True
         except Exception as e:
-            print(f"РћС€РёР±РєР° РёРЅРІРµРЅС‚Р°СЂРёР·Р°С†РёРё: {e}")
+            print(f"Ошибка инвентаризации: {e}")
             return False
 
     @Slot(result="QVariantList")
     def getMaterialsList(self):
         with get_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute("SELECT id, name FROM materials ORDER BY name")
+                cur.execute("ALTER TABLE IF EXISTS materials ADD COLUMN IF NOT EXISTS source TEXT")
+                cur.execute("ALTER TABLE IF EXISTS materials ADD COLUMN IF NOT EXISTS updated_date DATE DEFAULT CURRENT_DATE")
+                cur.execute("SELECT id, name, COALESCE(unit, ''), COALESCE(source, '') FROM materials ORDER BY name")
                 rows = cur.fetchall()
-        return [{"id": row[0], "name": row[1]} for row in rows]
+            conn.commit()
+        return [{"id": row[0], "name": row[1], "unit": row[2] or "", "source": row[3] or ""} for row in rows]
+
+    @Slot(result="QVariantList")
+    def getCompositeMaterialRecipes(self):
+        try:
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    self._ensure_composite_materials_schema(cur)
+                    cur.execute("""
+                        SELECT
+                            r.id,
+                            m.id,
+                            m.name,
+                            COALESCE(m.unit, ''),
+                            COALESCE(r.output_quantity, 1),
+                            COALESCE(inv.quantity, 0),
+                            COALESCE(m.source, ''),
+                            COALESCE(m.notes, ''),
+                            COALESCE(component_summary.component_count, 0),
+                            COALESCE(component_summary.craftable, TRUE)
+                        FROM composite_material_recipes r
+                        JOIN materials m ON m.id = r.output_material_id
+                        LEFT JOIN material_inventory inv ON inv.material_id = r.output_material_id
+                        LEFT JOIN (
+                            SELECT
+                                ri.recipe_id,
+                                COUNT(*) AS component_count,
+                                BOOL_AND(COALESCE(mi.quantity, 0) >= COALESCE(ri.quantity, 0)) AS craftable
+                            FROM composite_material_recipe_items ri
+                            LEFT JOIN material_inventory mi ON mi.material_id = ri.material_id
+                            GROUP BY ri.recipe_id
+                        ) component_summary ON component_summary.recipe_id = r.id
+                        ORDER BY m.name
+                    """)
+                    rows = cur.fetchall()
+                    conn.commit()
+            result = []
+            for row in rows:
+                component_count = int(row[8] or 0)
+                craftable = bool(row[9]) if component_count > 0 else False
+                status_key = "craftable" if craftable else ("empty" if component_count == 0 else "blocked")
+                status_text = "Можно собрать" if craftable else ("Нет компонентов" if component_count == 0 else "Нельзя собрать")
+                result.append({
+                    "recipe_id": int(row[0]),
+                    "material_id": int(row[1]),
+                    "name": row[2] or "",
+                    "unit": row[3] or "",
+                    "output_quantity": float(row[4] or 1),
+                    "stock_quantity": float(row[5] or 0),
+                    "source": row[6] or "",
+                    "notes": row[7] or "",
+                    "component_count": component_count,
+                    "craftable": craftable,
+                    "status_key": status_key,
+                    "status_text": status_text,
+                })
+            return result
+        except Exception as e:
+            print(f"Ошибка получения составных материалов: {e}")
+            return []
+
+    @Slot(int, result="QVariantList")
+    def getCompositeMaterialRecipeItems(self, recipe_id):
+        try:
+            if recipe_id <= 0:
+                return []
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    self._ensure_composite_materials_schema(cur)
+                    cur.execute("""
+                        SELECT
+                            ri.id,
+                            ri.material_id,
+                            m.name,
+                            COALESCE(m.unit, ''),
+                            COALESCE(ri.quantity, 0),
+                            COALESCE(inv.quantity, 0)
+                        FROM composite_material_recipe_items ri
+                        JOIN materials m ON m.id = ri.material_id
+                        LEFT JOIN material_inventory inv ON inv.material_id = ri.material_id
+                        WHERE ri.recipe_id = %s
+                        ORDER BY m.name
+                    """, (recipe_id,))
+                    rows = cur.fetchall()
+                    conn.commit()
+            result = []
+            for row in rows:
+                required = float(row[4] or 0)
+                in_stock = float(row[5] or 0)
+                result.append({
+                    "item_id": int(row[0]),
+                    "material_id": int(row[1]),
+                    "material_name": row[2] or "",
+                    "unit": row[3] or "",
+                    "required_quantity": required,
+                    "in_stock": in_stock,
+                    "enough": in_stock >= required
+                })
+            return result
+        except Exception as e:
+            print(f"Ошибка получения состава рецепта: {e}")
+            return []
+
+    @Slot(str, str, float, str, str, str, float, float, "QVariantList", result="QVariantMap")
+    def addCompositeMaterialRecipe(self, name, unit, output_quantity, source, notes, updated_date_str, low_stock_threshold, enough_stock_threshold, components):
+        try:
+            from datetime import datetime, date
+
+            clean_name = (name or "").strip()
+            if not clean_name:
+                return {"ok": False, "message": "Укажите название составного материала."}
+
+            output_qty_dec = Decimal(str(output_quantity or 0))
+            if output_qty_dec <= 0:
+                return {"ok": False, "message": "Количество на выходе должно быть больше нуля."}
+
+            updated_date = datetime.strptime(updated_date_str, "%Y-%m-%d").date() if updated_date_str else date.today()
+            low_threshold_decimal = Decimal(str(low_stock_threshold or 1))
+            enough_threshold_decimal = Decimal(str(enough_stock_threshold or 3))
+            if low_threshold_decimal < 0:
+                low_threshold_decimal = Decimal("1")
+            if enough_threshold_decimal <= 0:
+                enough_threshold_decimal = Decimal("3")
+            if enough_threshold_decimal < low_threshold_decimal:
+                enough_threshold_decimal = low_threshold_decimal
+
+            normalized_components = []
+            for item in components or []:
+                material_id = int(item.get("material_id", 0) or 0)
+                qty_dec = Decimal(str(item.get("quantity", 0) or 0))
+                if material_id > 0 and qty_dec > 0:
+                    normalized_components.append((material_id, qty_dec))
+            if not normalized_components:
+                return {"ok": False, "message": "Добавьте хотя бы один компонент."}
+
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    self._ensure_composite_materials_schema(cur)
+                    cur.execute("""
+                        INSERT INTO materials (name, unit, category, source, notes, updated_date, low_stock_threshold, enough_stock_threshold)
+                        VALUES (%s, %s, 'Составные', %s, %s, %s, %s, %s)
+                        ON CONFLICT (name) DO UPDATE SET
+                            unit = EXCLUDED.unit,
+                            category = EXCLUDED.category,
+                            source = EXCLUDED.source,
+                            notes = COALESCE(EXCLUDED.notes, materials.notes),
+                            updated_date = EXCLUDED.updated_date,
+                            low_stock_threshold = EXCLUDED.low_stock_threshold,
+                            enough_stock_threshold = EXCLUDED.enough_stock_threshold
+                        RETURNING id
+                    """, (
+                        clean_name,
+                        (unit or "шт").strip(),
+                        (source or "Составной материал").strip(),
+                        notes.strip() if notes else None,
+                        updated_date,
+                        low_threshold_decimal,
+                        enough_threshold_decimal
+                    ))
+                    output_material_id = cur.fetchone()[0]
+
+                    cur.execute("""
+                        INSERT INTO composite_material_recipes (output_material_id, output_quantity, notes, updated_at)
+                        VALUES (%s, %s, %s, CURRENT_TIMESTAMP)
+                        ON CONFLICT (output_material_id) DO UPDATE SET
+                            output_quantity = EXCLUDED.output_quantity,
+                            notes = EXCLUDED.notes,
+                            updated_at = CURRENT_TIMESTAMP
+                        RETURNING id
+                    """, (
+                        output_material_id,
+                        output_qty_dec,
+                        notes.strip() if notes else None
+                    ))
+                    recipe_id = cur.fetchone()[0]
+
+                    for material_id, qty_dec in normalized_components:
+                        if material_id == output_material_id:
+                            conn.rollback()
+                            return {"ok": False, "message": "Нельзя использовать материал самого рецепта как его компонент."}
+                    cur.execute("DELETE FROM composite_material_recipe_items WHERE recipe_id = %s", (recipe_id,))
+                    for material_id, qty_dec in normalized_components:
+                        cur.execute("""
+                            INSERT INTO composite_material_recipe_items (recipe_id, material_id, quantity)
+                            VALUES (%s, %s, %s)
+                        """, (recipe_id, material_id, qty_dec))
+                conn.commit()
+
+            self._log_operation(
+                "Склад",
+                f"Сохранён рецепт составного материала: {clean_name}",
+                details=f"Компонентов: {len(normalized_components)}, выход: {output_qty_dec} {(unit or 'шт').strip()}"
+            )
+            return {"ok": True, "message": "Рецепт составного материала сохранён."}
+        except Exception as e:
+            print(f"Ошибка сохранения составного материала: {e}")
+            return {"ok": False, "message": f"Ошибка сохранения рецепта: {e}"}
+
+    @Slot(int, result="QVariantMap")
+    def deleteCompositeMaterialRecipe(self, recipe_id):
+        try:
+            if recipe_id <= 0:
+                return {"ok": False, "message": "Рецепт не выбран."}
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    self._ensure_composite_materials_schema(cur)
+                    cur.execute("""
+                        SELECT r.output_material_id, m.name
+                        FROM composite_material_recipes r
+                        JOIN materials m ON m.id = r.output_material_id
+                        WHERE r.id = %s
+                    """, (recipe_id,))
+                    row = cur.fetchone()
+                    if not row:
+                        return {"ok": False, "message": "Рецепт не найден."}
+                    output_material_id, material_name = row
+                    cur.execute("DELETE FROM composite_material_recipes WHERE id = %s", (recipe_id,))
+                    conn.commit()
+            self._log_operation("Склад", f"Удалён рецепт составного материала: {material_name}")
+            return {"ok": True, "message": "Рецепт удалён."}
+        except Exception as e:
+            print(f"Ошибка удаления рецепта: {e}")
+            return {"ok": False, "message": f"Ошибка удаления рецепта: {e}"}
+
+    @Slot(int, float, str, result="QVariantMap")
+    def craftCompositeMaterial(self, recipe_id, batches, notes):
+        try:
+            from datetime import date
+            from backend.models.production import _consume_material_fifo
+
+            if recipe_id <= 0:
+                return {"ok": False, "message": "Рецепт не выбран."}
+            batches_dec = Decimal(str(batches or 0))
+            if batches_dec <= 0:
+                return {"ok": False, "message": "Количество партий должно быть больше нуля."}
+
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    self._ensure_composite_materials_schema(cur)
+                    cur.execute("""
+                        SELECT
+                            r.output_material_id,
+                            m.name,
+                            COALESCE(m.unit, ''),
+                            COALESCE(r.output_quantity, 1),
+                            COALESCE(m.source, '')
+                        FROM composite_material_recipes r
+                        JOIN materials m ON m.id = r.output_material_id
+                        WHERE r.id = %s
+                    """, (recipe_id,))
+                    recipe_row = cur.fetchone()
+                    if not recipe_row:
+                        return {"ok": False, "message": "Рецепт не найден."}
+
+                    output_material_id, output_name, output_unit, output_quantity, output_source = recipe_row
+                    output_qty_total = Decimal(str(output_quantity or 1)) * batches_dec
+
+                    cur.execute("""
+                        SELECT ri.material_id, m.name, COALESCE(m.unit, ''), COALESCE(ri.quantity, 0)
+                        FROM composite_material_recipe_items ri
+                        JOIN materials m ON m.id = ri.material_id
+                        WHERE ri.recipe_id = %s
+                        ORDER BY m.name
+                    """, (recipe_id,))
+                    component_rows = cur.fetchall()
+                    if not component_rows:
+                        return {"ok": False, "message": "У рецепта нет компонентов."}
+
+                    shortages = []
+                    total_cost = Decimal("0.00")
+                    for material_id, material_name, material_unit, base_qty in component_rows:
+                        required_qty = Decimal(str(base_qty or 0)) * batches_dec
+                        cur.execute("SELECT COALESCE(quantity, 0) FROM material_inventory WHERE material_id = %s FOR UPDATE", (material_id,))
+                        inv_row = cur.fetchone()
+                        in_stock = Decimal(str(inv_row[0] if inv_row else 0))
+                        if in_stock < required_qty:
+                            shortages.append(f"{material_name}: нужно {required_qty}, на складе {in_stock}")
+
+                    if shortages:
+                        return {"ok": False, "message": "Нельзя собрать материал: " + "; ".join(shortages)}
+
+                    for material_id, material_name, material_unit, base_qty in component_rows:
+                        required_qty = Decimal(str(base_qty or 0)) * batches_dec
+                        cur.execute("""
+                            UPDATE material_inventory
+                            SET quantity = GREATEST(COALESCE(quantity, 0) - %s, 0)
+                            WHERE material_id = %s
+                        """, (required_qty, material_id))
+                        cur.execute("""
+                            INSERT INTO material_transactions (material_id, quantity_change, transaction_type, reference_id)
+                            VALUES (%s, %s, 'composite_out', %s)
+                        """, (material_id, -required_qty, output_material_id))
+                        total_cost += _consume_material_fifo(cur, material_id, required_qty)
+
+                    unit_price = (total_cost / output_qty_total).quantize(Decimal("0.01")) if output_qty_total > 0 else Decimal("0.00")
+                    craft_note = notes.strip() if notes else f"Составной материал: {output_name}"
+
+                    cur.execute("""
+                        INSERT INTO material_inventory (material_id, quantity)
+                        VALUES (%s, %s)
+                        ON CONFLICT (material_id) DO UPDATE
+                        SET quantity = material_inventory.quantity + EXCLUDED.quantity
+                    """, (output_material_id, output_qty_total))
+                    cur.execute("""
+                        INSERT INTO purchases (material_id, price_per_unit, quantity, remaining_quantity, purchase_date, notes)
+                        VALUES (%s, %s, %s, %s, CURRENT_DATE, %s)
+                    """, (
+                        output_material_id,
+                        unit_price,
+                        output_qty_total,
+                        output_qty_total,
+                        craft_note
+                    ))
+                    cur.execute("""
+                        INSERT INTO material_transactions (material_id, quantity_change, transaction_type, reference_id)
+                        VALUES (%s, %s, 'composite_in', %s)
+                    """, (output_material_id, output_qty_total, recipe_id))
+                    cur.execute("""
+                        UPDATE materials
+                        SET updated_date = %s
+                        WHERE id = %s
+                    """, (date.today(), output_material_id))
+                conn.commit()
+
+            self._log_operation(
+                "Склад",
+                f"Собран составной материал: {output_name}",
+                amount=total_cost,
+                details=f"Партий: {batches_dec}, получено: {output_qty_total} {output_unit or ''}"
+            )
+            return {
+                "ok": True,
+                "message": f"Материал '{output_name}' изготовлен. Добавлено {output_qty_total:.4f} {output_unit or ''}. Себестоимость за единицу: {unit_price:.2f} руб."
+            }
+        except Exception as e:
+            print(f"Ошибка изготовления составного материала: {e}")
+            return {"ok": False, "message": f"Ошибка изготовления материала: {e}"}
 
     @Slot(int, float, str, result=bool)
     def updateMaterialUnitPrice(self, material_id, new_price, note):
@@ -1929,7 +2325,7 @@ class BackendController(QObject):
                     cur.execute("""
                         INSERT INTO purchases (material_id, price_per_unit, quantity, remaining_quantity, purchase_date, notes)
                         VALUES (%s, %s, 0, 0, CURRENT_DATE, %s)
-                    """, (material_id, Decimal(str(new_price)), note if note else "РћР±РЅРѕРІР»РµРЅРёРµ С†РµРЅС‹ Р·Р° РµРґРёРЅРёС†Сѓ"))
+                    """, (material_id, Decimal(str(new_price)), note if note else "Обновление цены за единицу"))
                     conn.commit()
             self._log_operation(
                 "Материалы",
@@ -1939,7 +2335,7 @@ class BackendController(QObject):
             )
             return True
         except Exception as e:
-            print(f"РћС€РёР±РєР° РѕР±РЅРѕРІР»РµРЅРёСЏ С†РµРЅС‹ РјР°С‚РµСЂРёР°Р»Р°: {e}")
+            print(f"Ошибка обновления цены материала: {e}")
             return False
 
     @Slot(int, str, float, float, str, str, result="QVariantMap")
@@ -2030,10 +2426,11 @@ class BackendController(QObject):
                     unit_price = (total_cost / quantity).quantize(Decimal("0.01")) if quantity else Decimal("0.00")
                     target_notes = notes.strip() if notes else f"Деталь из материала: {source_name}"
                     cur.execute("""
-                        INSERT INTO materials (name, unit, source, notes, updated_date)
-                        VALUES (%s, %s, %s, %s, CURRENT_DATE)
+                        INSERT INTO materials (name, unit, category, source, notes, updated_date)
+                        VALUES (%s, %s, 'Раскрой плит', %s, %s, CURRENT_DATE)
                         ON CONFLICT (name) DO UPDATE SET
                             unit = EXCLUDED.unit,
+                            category = EXCLUDED.category,
                             source = EXCLUDED.source,
                             notes = COALESCE(EXCLUDED.notes, materials.notes),
                             updated_date = CURRENT_DATE
@@ -2198,7 +2595,7 @@ class BackendController(QObject):
                 for r in rows
             ]
         except Exception as e:
-            print(f"?????? ????????? ????/??????: {e}")
+            print(f"Error loading plate lots/materials: {e}")
             return []
 
     @Slot(int, int, float, float, str, str, result="QVariantMap")
@@ -2323,7 +2720,8 @@ class BackendController(QObject):
                     ))
                     cur.execute("""
                         UPDATE materials
-                        SET updated_date = %s
+                        SET updated_date = %s,
+                            category = 'Раскрой плит'
                         WHERE id = %s
                     """, (updated_date, target_material_id))
                     conn.commit()
@@ -2416,10 +2814,11 @@ class BackendController(QObject):
                     unit_price = (total_cost / quantity).quantize(Decimal("0.01"))
                     target_notes = notes.strip() if notes else f"Деталь из партии #{purchase_id}: {source_name}"
                     cur.execute("""
-                        INSERT INTO materials (name, unit, source, notes, updated_date)
-                        VALUES (%s, %s, %s, %s, %s)
+                        INSERT INTO materials (name, unit, category, source, notes, updated_date)
+                        VALUES (%s, %s, 'Раскрой плит', %s, %s, %s)
                         ON CONFLICT (name) DO UPDATE SET
                             unit = EXCLUDED.unit,
+                            category = EXCLUDED.category,
                             source = EXCLUDED.source,
                             notes = COALESCE(EXCLUDED.notes, materials.notes),
                             updated_date = EXCLUDED.updated_date
@@ -2491,11 +2890,19 @@ class BackendController(QObject):
 
     # ---------- РРЅСЃС‚СЂСѓРјРµРЅС‚С‹ ----------
 
-    @Slot(int, str, str, float, str, str, str, float, str, result=bool)
-    def updateMaterial(self, material_id, name, unit, quantity, source, notes, updated_date_str, new_price, reason):
+    @Slot(int, str, str, float, str, str, str, float, str, float, float, result=bool)
+    def updateMaterial(self, material_id, name, unit, quantity, source, notes, updated_date_str, new_price, reason, low_stock_threshold, enough_stock_threshold):
         try:
             if material_id <= 0 or not name:
                 return False
+            low_threshold_decimal = Decimal(str(low_stock_threshold or 1))
+            enough_threshold_decimal = Decimal(str(enough_stock_threshold or 3))
+            if low_threshold_decimal < 0:
+                low_threshold_decimal = Decimal("1")
+            if enough_threshold_decimal <= 0:
+                enough_threshold_decimal = Decimal("3")
+            if enough_threshold_decimal < low_threshold_decimal:
+                enough_threshold_decimal = low_threshold_decimal
             from datetime import datetime, date
             updated_date = datetime.strptime(updated_date_str, "%Y-%m-%d").date() if updated_date_str else date.today()
             with get_connection() as conn:
@@ -2503,13 +2910,17 @@ class BackendController(QObject):
                     cur.execute("ALTER TABLE IF EXISTS materials ADD COLUMN IF NOT EXISTS source TEXT")
                     cur.execute("ALTER TABLE IF EXISTS materials ADD COLUMN IF NOT EXISTS notes TEXT")
                     cur.execute("ALTER TABLE IF EXISTS materials ADD COLUMN IF NOT EXISTS updated_date DATE DEFAULT CURRENT_DATE")
+                    cur.execute("ALTER TABLE IF EXISTS materials ADD COLUMN IF NOT EXISTS low_stock_threshold DECIMAL(12, 3) DEFAULT 1")
+                    cur.execute("ALTER TABLE IF EXISTS materials ADD COLUMN IF NOT EXISTS enough_stock_threshold DECIMAL(12, 3) DEFAULT 3")
                     cur.execute("""
                         UPDATE materials
                         SET name = %s,
                             unit = %s,
                             source = %s,
                             notes = %s,
-                            updated_date = %s
+                            updated_date = %s,
+                            low_stock_threshold = %s,
+                            enough_stock_threshold = %s
                         WHERE id = %s
                     """, (
                         name.strip(),
@@ -2517,6 +2928,8 @@ class BackendController(QObject):
                         source.strip() if source else None,
                         notes.strip() if notes else None,
                         updated_date,
+                        low_threshold_decimal,
+                        enough_threshold_decimal,
                         material_id
                     ))
 
@@ -2589,7 +3002,7 @@ class BackendController(QObject):
             )
             return True
         except Exception as e:
-            print(f"РћС€РёР±РєР° РґРѕР±Р°РІР»РµРЅРёСЏ РёРЅСЃС‚СЂСѓРјРµРЅС‚Р°: {e}")
+            print(f"Ошибка добавления инструмента: {e}")
             return False
 
     @Slot(result="QVariantList")
@@ -2662,14 +3075,14 @@ class BackendController(QObject):
             print(f"Error posting depreciation: {e}")
             return False
 
-    # ---------- РњРѕРґРµР»Рё СЃС‚Р°РЅРєРѕРІ ----------
+    # ---------- Модели станков ----------
     @Slot(str, result=bool)
     def addMachineModel(self, model):
         try:
             from backend.models.machine import add_new_machine_gui
             return add_new_machine_gui(model)
         except Exception as e:
-            print(f"РћС€РёР±РєР° РґРѕР±Р°РІР»РµРЅРёСЏ РјРѕРґРµР»Рё: {e}")
+            print(f"Ошибка добавления модели: {e}")
             return False
 
     @Slot(int, int, float, result=bool)
@@ -2678,7 +3091,7 @@ class BackendController(QObject):
             from backend.models.machine import add_material_to_machine_gui
             return add_material_to_machine_gui(machine_id, material_id, Decimal(str(quantity)))
         except Exception as e:
-            print(f"РћС€РёР±РєР° РґРѕР±Р°РІР»РµРЅРёСЏ РјР°С‚РµСЂРёР°Р»Р°: {e}")
+            print(f"Ошибка добавления материала: {e}")
             return False
 
     @Slot(int, int, result=bool)
@@ -2687,7 +3100,7 @@ class BackendController(QObject):
             from backend.models.machine import remove_material_from_machine_gui
             return remove_material_from_machine_gui(machine_id, material_id)
         except Exception as e:
-            print(f"РћС€РёР±РєР° СѓРґР°Р»РµРЅРёСЏ РјР°С‚РµСЂРёР°Р»Р°: {e}")
+            print(f"Ошибка удаления материала: {e}")
             return False
 
     @Slot(int, int, float, result=bool)
@@ -2696,7 +3109,7 @@ class BackendController(QObject):
             from backend.models.machine import edit_material_quantity_in_machine_gui
             return edit_material_quantity_in_machine_gui(machine_id, material_id, Decimal(str(quantity)))
         except Exception as e:
-            print(f"РћС€РёР±РєР° РёР·РјРµРЅРµРЅРёСЏ РєРѕР»РёС‡РµСЃС‚РІР°: {e}")
+            print(f"Ошибка изменения количества: {e}")
             return False
 
     @Slot(int, result=bool)
@@ -2704,22 +3117,22 @@ class BackendController(QObject):
         try:
             with get_connection() as conn:
                 with conn.cursor() as cur:
-                    # РџСЂРѕРІРµСЂСЏРµРј С‡С‚Рѕ РЅРµС‚ СЃС‚Р°РЅРєРѕРІ РІ РїСЂРѕРёР·РІРѕРґСЃС‚РІРµ СЃ СЌС‚РѕР№ РјРѕРґРµР»СЊСЋ
+                    # Проверяем что нет станков в производстве с этой моделью
                     cur.execute("""
                         SELECT COUNT(*) FROM finished_goods 
                         WHERE machine_id = %s AND status IN ('in_progress', 'completed')
                     """, (machine_id,))
                     count = cur.fetchone()[0]
                     if count > 0:
-                        print(f"РќРµР»СЊР·СЏ СѓРґР°Р»РёС‚СЊ РјРѕРґРµР»СЊ: РµСЃС‚СЊ {count} СЃС‚Р°РЅРєРѕРІ РІ РїСЂРѕРёР·РІРѕРґСЃС‚РІРµ/РЅР° СЃРєР»Р°РґРµ")
+                        print(f"Нельзя удалить модель: есть {count} станков в производстве/на складе")
                         return False
                 
-                # РЈРґР°Р»СЏРµРј РјРѕРґРµР»СЊ (РєР°СЃРєР°РґРЅРѕ СѓРґР°Р»СЏС‚СЃСЏ machine_materials, machine_tools, machine_labor_costs)
+                # Удаляем модель (каскадно удалятся machine_materials, machine_tools, machine_labor_costs)
                     cur.execute("DELETE FROM machines WHERE id = %s", (machine_id,))
                     conn.commit()
             return True
         except Exception as e:
-            print(f"РћС€РёР±РєР° СѓРґР°Р»РµРЅРёСЏ РјРѕРґРµР»Рё: {e}")
+            print(f"Ошибка удаления модели: {e}")
             return False
 
     @Slot(int, int, str, result=bool)
@@ -2728,7 +3141,7 @@ class BackendController(QObject):
             from backend.models.production import produce_machine_gui
             return produce_machine_gui(machine_id, quantity, notes)
         except Exception as e:
-            print(f"РћС€РёР±РєР° РїСЂРѕРёР·РІРѕРґСЃС‚РІР°: {e}")
+            print(f"Ошибка производства: {e}")
             return False
 
     @Slot(int, float, str, result=bool)
@@ -2745,7 +3158,7 @@ class BackendController(QObject):
                 )
             return ok
         except Exception as e:
-            print(f"РћС€РёР±РєР° РїСЂРѕРґР°Р¶Рё: {e}")
+            print(f"Ошибка продажи: {e}")
             return False
 
     @Slot(int, str, str, result=bool)
@@ -2783,7 +3196,7 @@ class BackendController(QObject):
                 )
             return ok
         except Exception as e:
-            print(f"РћС€РёР±РєР° Р·Р°РІРµСЂС€РµРЅРёСЏ РїСЂРѕРёР·РІРѕРґСЃС‚РІР°: {e}")
+            print(f"Ошибка завершения производства: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -2797,6 +3210,7 @@ class BackendController(QObject):
             months_to_recalculate = []
             with get_connection() as conn:
                 with conn.cursor() as cur:
+                    self._ensure_material_reservation_schema(cur)
                     cur.execute("""
                         SELECT status, COALESCE(start_date, produced_date, CURRENT_DATE), COALESCE(produced_date, CURRENT_DATE)
                         FROM finished_goods
@@ -2820,6 +3234,31 @@ class BackendController(QObject):
                     cur.execute("DELETE FROM indirect_cost_allocations WHERE finished_good_id = %s", (finished_good_id,))
                     cur.execute("DELETE FROM tool_depreciation WHERE finished_good_id = %s", (finished_good_id,))
                     cur.execute("DELETE FROM finished_good_labor WHERE finished_good_id = %s", (finished_good_id,))
+                    cur.execute("""
+                        SELECT material_id, purchase_id, quantity
+                        FROM finished_good_material_reservations
+                        WHERE finished_good_id = %s
+                    """, (finished_good_id,))
+                    reservations = cur.fetchall()
+                    for material_id, purchase_id, quantity in reservations:
+                        qty_dec = Decimal(str(quantity or 0))
+                        if purchase_id:
+                            cur.execute("""
+                                UPDATE purchases
+                                SET remaining_quantity = COALESCE(remaining_quantity, 0) + %s
+                                WHERE id = %s
+                            """, (qty_dec, purchase_id))
+                        cur.execute("""
+                            INSERT INTO material_inventory (material_id, quantity)
+                            VALUES (%s, %s)
+                            ON CONFLICT (material_id) DO UPDATE
+                            SET quantity = material_inventory.quantity + EXCLUDED.quantity
+                        """, (material_id, qty_dec))
+                        cur.execute("""
+                            INSERT INTO material_transactions (material_id, quantity_change, transaction_type, reference_id)
+                            VALUES (%s, %s, 'reservation_release', %s)
+                        """, (material_id, qty_dec, finished_good_id))
+                    cur.execute("DELETE FROM finished_good_material_reservations WHERE finished_good_id = %s", (finished_good_id,))
                     cur.execute("DELETE FROM finished_goods WHERE id = %s AND status = 'in_progress'", (finished_good_id,))
                     conn.commit()
 
@@ -2837,14 +3276,14 @@ class BackendController(QObject):
             traceback.print_exc()
             return False
 
-    # ---------- Р¤РёРЅР°РЅСЃС‹ Рё Р°РЅР°Р»РёС‚РёРєР° ----------
+    # ---------- Финансы и аналитика ----------
     @Slot(result=str)
     def getTotalAssets(self):
         try:
             from backend.models.analytics import get_total_assets
             return f"{get_total_assets():.2f}"
         except Exception as e:
-            print(f"РћС€РёР±РєР° РїРѕР»СѓС‡РµРЅРёСЏ Р°РєС‚РёРІРѕРІ: {e}")
+            print(f"Ошибка получения активов: {e}")
             return "0.00"
 
 
@@ -3025,7 +3464,7 @@ class BackendController(QObject):
                     revenue = cur.fetchone()[0]
             return f"{revenue:.2f}"
         except Exception as e:
-            print(f"РћС€РёР±РєР° СЂР°СЃС‡С‘С‚Р° РІС‹СЂСѓС‡РєРё: {e}")
+            print(f"Ошибка расчёта выручки: {e}")
             return "0.00"
 
     @Slot(str, str, result=str)
@@ -3040,7 +3479,7 @@ class BackendController(QObject):
                     profit = cur.fetchone()[0]
             return f"{profit:.2f}"
         except Exception as e:
-            print(f"РћС€РёР±РєР° СЂР°СЃС‡С‘С‚Р° РїСЂРёР±С‹Р»Рё: {e}")
+            print(f"Ошибка расчёта прибыли: {e}")
             return "0.00"
 
     @Slot(str, str, result=str)
@@ -3079,20 +3518,20 @@ class BackendController(QObject):
                     material_cost = abs(cur.fetchone()[0] or Decimal('0'))
                     total_expense = tool_depr + salary + material_cost
                     profit = revenue - total_expense
-                    report = f"РћРўР§РЃРў Рћ РџР РР‘Р«Р›РЇРҐ Р РЈР‘Р«РўРљРђРҐ\nРџРµСЂРёРѕРґ: {start} вЂ“ {end}\n"
+                    report = f"PROFIT AND LOSS REPORT\nPeriod: {start} - {end}\n"
                     report += f"{'='*50}\n"
-                    report += f"Р”РѕС…РѕРґС‹ (РїСЂРѕРґР°Р¶Рё): {revenue:.2f} СЂСѓР±.\n"
-                    report += f"Р Р°СЃС…РѕРґС‹:\n"
-                    report += f"  - РњР°С‚РµСЂРёР°Р»С‹: {material_cost:.2f} СЂСѓР±.\n"
-                    report += f"  - Р—Р°СЂРїР»Р°С‚Р°: {salary:.2f} СЂСѓР±.\n"
-                    report += f"  - РђРјРѕСЂС‚РёР·Р°С†РёСЏ РёРЅСЃС‚СЂСѓРјРµРЅС‚РѕРІ: {tool_depr:.2f} СЂСѓР±.\n"
-                    report += f"  РС‚РѕРіРѕ СЂР°СЃС…РѕРґРѕРІ: {total_expense:.2f} СЂСѓР±.\n"
+                    report += f"Доходы (продажи): {revenue:.2f} руб.\n"
+                    report += f"Expenses:\n"
+                    report += f"  - Materials: {material_cost:.2f} rub.\n"
+                    report += f"  - Salary: {salary:.2f} rub.\n"
+                    report += f"  - Tool depreciation: {tool_depr:.2f} rub.\n"
+                    report += f"  Total expenses: {total_expense:.2f} rub.\n"
                     report += f"{'='*50}\n"
-                    report += f"Р§РРЎРўРђРЇ РџР РР‘Р«Р›Р¬: {profit:.2f} СЂСѓР±.\n"
+                    report += f"NET PROFIT: {profit:.2f} rub.\n"
                     return report
         except Exception as e:
-            print(f"РћС€РёР±РєР° С„РѕСЂРјРёСЂРѕРІР°РЅРёСЏ РѕС‚С‡С‘С‚Р°: {e}")
-            return "РћС€РёР±РєР° РїСЂРё С„РѕСЂРјРёСЂРѕРІР°РЅРёРё РѕС‚С‡С‘С‚Р°"
+            print(f"Ошибка формирования отчёта: {e}")
+            return "Ошибка при формировании отчёта"
 
     @Slot(str, str, result=str)
     def getProfitLossReport(self, start_date_str, end_date_str):
@@ -3313,11 +3752,11 @@ class BackendController(QObject):
 
     @Slot(int, float, str, str, str, result=bool)
     def sellFinishedGoodExtended(self, finished_good_id, sale_price, buyer, inv_number, sale_date):
-        """Р Р°СЃС€РёСЂРµРЅРЅР°СЏ РІРµСЂСЃРёСЏ РїСЂРѕРґР°Р¶Рё СЃ РёРЅРІ. РЅРѕРјРµСЂРѕРј Рё РґР°С‚РѕР№."""
+        """Расширенная версия продажи с инв. номером и датой."""
         try:
             from datetime import datetime, date
             
-            # РћР±СЂР°Р±РѕС‚РєР° РґР°С‚С‹
+            # Обработка даты
             if sale_date:
                 try:
                     sale_date_obj = datetime.strptime(sale_date, "%Y-%m-%d").date()
@@ -3331,12 +3770,12 @@ class BackendController(QObject):
                     cur.execute("SELECT cost_price FROM finished_goods WHERE id = %s", (finished_good_id,))
                     cost_row = cur.fetchone()
                     if not cost_row:
-                        print("РЎС‚Р°РЅРѕРє РЅРµ РЅР°Р№РґРµРЅ")
+                        print("Станок не найден")
                         return False
                     
-                    cost = cost_row[0]  # Decimal РёР· Р‘Р”
+                    cost = cost_row[0]  # Decimal из БД
                     sale_price_decimal = Decimal(str(sale_price))  # в†ђ РРЎРџР РђР’Р›Р•РќРР•
-                    profit = sale_price_decimal - cost  # РўРµРїРµСЂСЊ РѕР±Р° Decimal
+                    profit = sale_price_decimal - cost  # Теперь оба Decimal
 
                     cur.execute("""
                         INSERT INTO sales (finished_good_id, sale_price, profit, sale_date)
@@ -3355,7 +3794,7 @@ class BackendController(QObject):
                     cur.execute("""
                         INSERT INTO balance (date, income, notes)
                         VALUES (%s, %s, %s)
-                    """, (sale_date_obj, sale_price_decimal, f"РџСЂРѕРґР°Р¶Р° СЃС‚Р°РЅРєР° ID {finished_good_id} РїРѕРєСѓРїР°С‚РµР»СЋ {buyer}"))
+                    """, (sale_date_obj, sale_price_decimal, f"Продажа станка ID {finished_good_id} покупателю {buyer}"))
 
                     conn.commit()
             self._log_operation(
@@ -3366,7 +3805,7 @@ class BackendController(QObject):
             )
             return True
         except Exception as e:
-            print(f"РћС€РёР±РєР° РїСЂРѕРґР°Р¶Рё: {e}")
+            print(f"Ошибка продажи: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -3585,25 +4024,25 @@ class BackendController(QObject):
             return {"header": "Ошибка", "breakdown": str(e)}
     @Slot(int, result=bool)
     def returnMachineToStock(self, finished_good_id):
-        """Р’РѕР·РІСЂР°С‰Р°РµС‚ РїСЂРѕРґР°РЅРЅС‹Р№ СЃС‚Р°РЅРѕРє РЅР° СЃРєР»Р°Рґ, СѓРґР°Р»СЏРµС‚ Р·Р°РїРёСЃСЊ Рѕ РїСЂРѕРґР°Р¶Рµ."""
+        """Возвращает проданный станок на склад, удаляет запись о продаже."""
         try:
             with get_connection() as conn:
                 with conn.cursor() as cur:
-                    # РџСЂРѕРІРµСЂСЏРµРј С‡С‚Рѕ СЃС‚Р°РЅРѕРє РґРµР№СЃС‚РІРёС‚РµР»СЊРЅРѕ РїСЂРѕРґР°РЅ
+                    # Проверяем что станок действительно продан
                     cur.execute("""
                         SELECT status FROM finished_goods WHERE id = %s
                     """, (finished_good_id,))
                     row = cur.fetchone()
                     if not row or row[0] != 'sold':
-                        print("РЎС‚Р°РЅРѕРє РЅРµ РЅР°Р№РґРµРЅ РёР»Рё РЅРµ РїСЂРѕРґР°РЅ")
+                        print("Станок не найден или не продан")
                         return False
 
-                    # РЈРґР°Р»СЏРµРј Р·Р°РїРёСЃСЊ Рѕ РїСЂРѕРґР°Р¶Рµ
+                    # Удаляем запись о продаже
                     cur.execute("""
                         DELETE FROM sales WHERE finished_good_id = %s
                     """, (finished_good_id,))
 
-                    # Р’РѕР·РІСЂР°С‰Р°РµРј СЃС‚Р°РЅРѕРє РЅР° СЃРєР»Р°Рґ
+                    # Возвращаем станок на склад
                     cur.execute("""
                         UPDATE finished_goods
                         SET status = 'completed',
@@ -3612,24 +4051,24 @@ class BackendController(QObject):
                         WHERE id = %s
                     """, (finished_good_id,))
 
-                    # РЈРґР°Р»СЏРµРј Р·Р°РїРёСЃСЊ РёР· Р±Р°Р»Р°РЅСЃР° (РµСЃР»Рё РµСЃС‚СЊ)
+                    # Удаляем запись из баланса (если есть)
                     cur.execute("""
                         DELETE FROM balance 
                         WHERE notes LIKE %s
-                    """, (f"%СЃС‚Р°РЅРєР° ID {finished_good_id}%",))
+                    """, (f"%станка ID {finished_good_id}%",))
 
                     conn.commit()
-                    print(f"РЎС‚Р°РЅРѕРє ID {finished_good_id} РІРѕР·РІСЂР°С‰С‘РЅ РЅР° СЃРєР»Р°Рґ")
+                    print(f"Станок ID {finished_good_id} возвращён на склад")
             return True
         except Exception as e:
-            print(f"РћС€РёР±РєР° РІРѕР·РІСЂР°С‚Р° РЅР° СЃРєР»Р°Рґ: {e}")
+            print(f"Ошибка возврата на склад: {e}")
             import traceback
             traceback.print_exc()
             return False
 
     @Slot(str, str, int, result="QVariantList")
     def getWorkHistory(self, date_from, date_to, employee_id=None):
-        """Р’РѕР·РІСЂР°С‰Р°РµС‚ РёСЃС‚РѕСЂРёСЋ СЂР°Р±РѕС‚С‹ СЃ С„РёР»СЊС‚СЂР°С†РёРµР№."""
+        """Возвращает историю работы с фильтрацией."""
         try:
             from datetime import datetime, date
             
@@ -3700,16 +4139,16 @@ class BackendController(QObject):
                 for r in rows
             ]
         except Exception as e:
-            print(f"РћС€РёР±РєР° РїРѕР»СѓС‡РµРЅРёСЏ РёСЃС‚РѕСЂРёРё: {e}")
+            print(f"Ошибка получения истории: {e}")
             return []
 
     @Slot(int, result=bool)
     def undoWorkLog(self, work_log_id):
-        """РћС‚РјРµРЅСЏРµС‚ Р·Р°РїРёСЃСЊ Рѕ СЂР°Р±РѕС‚Рµ Рё РїРµСЂРµСЃС‡РёС‚С‹РІР°РµС‚ СЃРµР±РµСЃС‚РѕРёРјРѕСЃС‚СЊ СЃС‚Р°РЅРєР°."""
+        """Отменяет запись о работе и пересчитывает себестоимость станка."""
         try:
             with get_connection() as conn:
                 with conn.cursor() as cur:
-                    # РџРѕР»СѓС‡Р°РµРј РёРЅС„РѕСЂРјР°С†РёСЋ Рѕ Р·Р°РїРёСЃРё
+                    # Получаем информацию о записи
                     cur.execute("""
                         SELECT e.hourly_rate, wl.hours, fgl.finished_good_id
                         FROM work_logs wl
@@ -3720,13 +4159,13 @@ class BackendController(QObject):
                     
                     row = cur.fetchone()
                     if not row:
-                        print("Р—Р°РїРёСЃСЊ РЅРµ РЅР°Р№РґРµРЅР°")
+                        print("Запись не найдена")
                         return False
                         
                     rate, hours, finished_good_id = row
                     cost_to_subtract = rate * hours
                     
-                    # Р•СЃР»Рё РїСЂРёРІСЏР·Р°РЅРѕ Рє СЃС‚Р°РЅРєСѓ вЂ” СѓРјРµРЅСЊС€Р°РµРј СЃРµР±РµСЃС‚РѕРёРјРѕСЃС‚СЊ
+                    # Если привязано к станку — уменьшаем себестоимость
                     if finished_good_id:
                         cur.execute("""
                             UPDATE finished_goods
@@ -3734,27 +4173,27 @@ class BackendController(QObject):
                             WHERE id = %s
                         """, (cost_to_subtract, finished_good_id))
                         
-                        # РЈРґР°Р»СЏРµРј СЃРІСЏР·СЊ
+                        # Удаляем связь
                         cur.execute("""
                             DELETE FROM finished_good_labor
                             WHERE work_log_id = %s
                         """, (work_log_id,))
                     
-                    # РЈРґР°Р»СЏРµРј СЃР°РјСѓ Р·Р°РїРёСЃСЊ
+                    # Удаляем саму запись
                     cur.execute("DELETE FROM work_logs WHERE id = %s", (work_log_id,))
                     
                     conn.commit()
-                    print(f"Р—Р°РїРёСЃСЊ Рѕ СЂР°Р±РѕС‚Рµ ID {work_log_id} РѕС‚РјРµРЅРµРЅР°, СЃРµР±РµСЃС‚РѕРёРјРѕСЃС‚СЊ СѓРјРµРЅСЊС€РµРЅР° РЅР° {cost_to_subtract:.2f}")
+                    print(f"Запись о работе ID {work_log_id} отменена, себестоимость уменьшена на {cost_to_subtract:.2f}")
             return True
         except Exception as e:
-            print(f"РћС€РёР±РєР° РѕС‚РјРµРЅС‹ Р·Р°РїРёСЃРё: {e}")
+            print(f"Ошибка отмены записи: {e}")
             import traceback
             traceback.print_exc()
             return False
 
     @Slot(int, float, str, str, str, float, result=bool)
     def sellFinishedGoodWithShipping(self, finished_good_id, sale_price, buyer, inv_number, sale_date, shipping_cost):
-        """РџСЂРѕРґР°Р¶Р° СЃ СѓС‡С‘С‚РѕРј С‚СЂР°РЅСЃРїРѕСЂС‚РёСЂРѕРІРєРё."""
+        """Продажа с учётом транспортировки."""
         try:
             from datetime import datetime, date
             
@@ -3771,13 +4210,13 @@ class BackendController(QObject):
                     cur.execute("SELECT cost_price FROM finished_goods WHERE id = %s", (finished_good_id,))
                     cost_row = cur.fetchone()
                     if not cost_row:
-                        print("РЎС‚Р°РЅРѕРє РЅРµ РЅР°Р№РґРµРЅ")
+                        print("Станок не найден")
                         return False
                     
                     cost = cost_row[0]
                     shipping_cost_decimal = Decimal(str(shipping_cost))
                     
-                    # Р•СЃР»Рё РґРѕСЃС‚Р°РІРєР° РїР»Р°С‚РЅР°СЏ вЂ” РґРѕР±Р°РІР»СЏРµРј Рє СЃРµР±РµСЃС‚РѕРёРјРѕСЃС‚Рё
+                    # Если доставка платная — добавляем к себестоимости
                     if shipping_cost_decimal > 0:
                         cur.execute("""
                             UPDATE finished_goods
@@ -3805,9 +4244,9 @@ class BackendController(QObject):
                         WHERE id = %s
                     """, (buyer, sale_date_obj, inv_number if inv_number else None, finished_good_id))
 
-                    notes = f"РџСЂРѕРґР°Р¶Р° СЃС‚Р°РЅРєР° ID {finished_good_id} РїРѕРєСѓРїР°С‚РµР»СЋ {buyer}"
+                    notes = f"Продажа станка ID {finished_good_id} покупателю {buyer}"
                     if shipping_cost_decimal > 0:
-                        notes += f" (РґРѕСЃС‚Р°РІРєР° {shipping_cost_decimal} в‚Ѕ РІРєР»СЋС‡РµРЅР° РІ СЃРµР±РµСЃС‚РѕРёРјРѕСЃС‚СЊ)"
+                        notes += f" (доставка {shipping_cost_decimal} ₽ включена в себестоимость)"
 
                     cur.execute("""
                         INSERT INTO balance (date, income, notes)
@@ -3823,18 +4262,19 @@ class BackendController(QObject):
             )
             return True
         except Exception as e:
-            print(f"РћС€РёР±РєР° РїСЂРѕРґР°Р¶Рё: {e}")
+            print(f"Ошибка продажи: {e}")
             import traceback
             traceback.print_exc()
         return False
 
     @Slot(int, result="QVariantList")
     def checkMaterialsForMachine(self, finished_good_id):
-        """РџСЂРѕРІРµСЂСЏРµС‚ РЅР°Р»РёС‡РёРµ РјР°С‚РµСЂРёР°Р»РѕРІ РґР»СЏ Р·Р°РІРµСЂС€РµРЅРёСЏ РїСЂРѕРёР·РІРѕРґСЃС‚РІР° СЃС‚Р°РЅРєР°."""
+        """Проверяет наличие материалов для завершения производства станка."""
         try:
             with get_connection() as conn:
                 with conn.cursor() as cur:
-                    # РџРѕР»СѓС‡Р°РµРј machine_id РёР· finished_goods
+                    self._ensure_material_reservation_schema(cur)
+                    # Получаем machine_id из finished_goods
                     cur.execute("""
                         SELECT machine_id FROM finished_goods WHERE id = %s
                     """, (finished_good_id,))
@@ -3844,39 +4284,237 @@ class BackendController(QObject):
                     
                     machine_id = row[0]
                     
-                    # РџСЂРѕРІРµСЂСЏРµРј РјР°С‚РµСЂРёР°Р»С‹
+                    # РџСЂРѕРІРµСЂСЏРµРј РјР°С‚РµСЂРёР°Р»С‹, резерв и свободный остаток
                     cur.execute("""
-                        SELECT 
+                        SELECT
+                            m.id,
                             m.name,
-                            mm.quantity AS required,
-                            COALESCE(inv.quantity, 0) AS in_stock,
-                            CASE 
-                                WHEN COALESCE(inv.quantity, 0) >= mm.quantity THEN true
-                                ELSE false
-                            END AS available
+                            COALESCE(mm.quantity, 0) AS required,
+                            COALESCE(res.reserved_qty, 0) AS reserved_qty,
+                            COALESCE(inv.quantity, 0) AS in_stock
                         FROM machine_materials mm
                         JOIN materials m ON mm.material_id = m.id
+                        LEFT JOIN (
+                            SELECT material_id, SUM(quantity) AS reserved_qty
+                            FROM finished_good_material_reservations
+                            WHERE finished_good_id = %s
+                            GROUP BY material_id
+                        ) res ON res.material_id = mm.material_id
                         LEFT JOIN material_inventory inv ON mm.material_id = inv.material_id
                         WHERE mm.machine_id = %s
-                        ORDER BY available ASC, m.name
-                    """, (machine_id,))
+                        ORDER BY m.name
+                    """, (finished_good_id, machine_id))
                     
                     rows = cur.fetchall()
-                    
-                    return [
-                        {
-                            "material_name": r[0],
-                            "required": float(r[1]),
-                            "in_stock": float(r[2]),
-                            "available": r[3]
-                        }
-                        for r in rows
-                    ]
+                    result = []
+                    for material_id, material_name, required, reserved_qty, in_stock in rows:
+                        required_val = float(required or 0)
+                        reserved_val = float(reserved_qty or 0)
+                        in_stock_val = float(in_stock or 0)
+                        if reserved_val >= required_val and required_val > 0:
+                            status_key = "reserved"
+                            status_text = "В резерве"
+                        elif reserved_val + in_stock_val >= required_val:
+                            status_key = "enough"
+                            status_text = "Достаточно"
+                        else:
+                            status_key = "shortage"
+                            status_text = "Не хватает"
+                        result.append({
+                            "material_id": int(material_id),
+                            "material_name": material_name,
+                            "required": required_val,
+                            "reserved": reserved_val,
+                            "in_stock": in_stock_val,
+                            "available": status_key == "reserved",
+                            "status_key": status_key,
+                            "status_text": status_text,
+                            "missing": max(required_val - reserved_val - in_stock_val, 0.0)
+                        })
+                    return result
         except Exception as e:
-            print(f"РћС€РёР±РєР° РїСЂРѕРІРµСЂРєРё РјР°С‚РµСЂРёР°Р»РѕРІ: {e}")
+            print(f"Ошибка проверки материалов: {e}")
             import traceback
             traceback.print_exc()
             return []
+
+    @Slot(int, result="QVariantMap")
+    def reserveMaterialsForMachine(self, finished_good_id):
+        try:
+            if finished_good_id <= 0:
+                return {"ok": False, "message": "Не выбран станок."}
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    self._ensure_material_reservation_schema(cur)
+                    cur.execute("""
+                        SELECT machine_id, machine_model
+                        FROM finished_goods
+                        WHERE id = %s AND status = 'in_progress'
+                    """, (finished_good_id,))
+                    fg_row = cur.fetchone()
+                    if not fg_row:
+                        return {"ok": False, "message": "Станок не найден или уже не в производстве."}
+
+                    machine_id, machine_model = fg_row
+                    cur.execute("""
+                        SELECT mm.material_id,
+                               m.name,
+                               COALESCE(mm.quantity, 0) AS required_qty,
+                               COALESCE(res.reserved_qty, 0) AS reserved_qty
+                        FROM machine_materials mm
+                        JOIN materials m ON m.id = mm.material_id
+                        LEFT JOIN (
+                            SELECT material_id, SUM(quantity) AS reserved_qty
+                            FROM finished_good_material_reservations
+                            WHERE finished_good_id = %s
+                            GROUP BY material_id
+                        ) res ON res.material_id = mm.material_id
+                        WHERE mm.machine_id = %s
+                        ORDER BY m.name
+                    """, (finished_good_id, machine_id))
+                    material_rows = cur.fetchall()
+
+                    reserved_lines = []
+                    for material_id, material_name, required_qty, reserved_qty in material_rows:
+                        required_dec = Decimal(str(required_qty or 0))
+                        reserved_dec = Decimal(str(reserved_qty or 0))
+                        missing = required_dec - reserved_dec
+                        if missing <= 0:
+                            continue
+
+                        cur.execute("""
+                            SELECT COALESCE(quantity, 0)
+                            FROM material_inventory
+                            WHERE material_id = %s
+                            FOR UPDATE
+                        """, (material_id,))
+                        inv_row = cur.fetchone()
+                        free_qty = Decimal(str(inv_row[0] if inv_row else 0))
+                        if free_qty <= 0:
+                            continue
+
+                        to_reserve = min(missing, free_qty)
+                        cur.execute("""
+                            SELECT id, COALESCE(remaining_quantity, 0), COALESCE(price_per_unit, 0), COALESCE(is_cash, FALSE)
+                            FROM purchases
+                            WHERE material_id = %s
+                              AND COALESCE(remaining_quantity, 0) > 0
+                            ORDER BY purchase_date ASC NULLS LAST, id ASC
+                            FOR UPDATE
+                        """, (material_id,))
+                        purchase_rows = cur.fetchall()
+                        remaining = to_reserve
+                        reserved_for_material = Decimal("0")
+                        for purchase_id, remaining_qty, price_per_unit, is_cash in purchase_rows:
+                            if remaining <= 0:
+                                break
+                            lot_qty = Decimal(str(remaining_qty or 0))
+                            if lot_qty <= 0:
+                                continue
+                            take_qty = min(lot_qty, remaining)
+                            amount = take_qty * Decimal(str(price_per_unit or 0))
+                            cur.execute("""
+                                UPDATE purchases
+                                SET remaining_quantity = GREATEST(COALESCE(remaining_quantity, 0) - %s, 0)
+                                WHERE id = %s
+                            """, (take_qty, purchase_id))
+                            cur.execute("""
+                                INSERT INTO finished_good_material_reservations
+                                    (finished_good_id, material_id, purchase_id, quantity, amount, is_cash)
+                                VALUES (%s, %s, %s, %s, %s, %s)
+                            """, (finished_good_id, material_id, purchase_id, take_qty, amount, bool(is_cash)))
+                            remaining -= take_qty
+                            reserved_for_material += take_qty
+
+                        if reserved_for_material > 0:
+                            cur.execute("""
+                                UPDATE material_inventory
+                                SET quantity = GREATEST(COALESCE(quantity, 0) - %s, 0)
+                                WHERE material_id = %s
+                            """, (reserved_for_material, material_id))
+                            cur.execute("""
+                                INSERT INTO material_transactions (material_id, quantity_change, transaction_type, reference_id)
+                                VALUES (%s, %s, 'reservation', %s)
+                            """, (material_id, -reserved_for_material, finished_good_id))
+                            reserved_lines.append(f"{material_name}: {reserved_for_material}")
+
+                    conn.commit()
+
+            if reserved_lines:
+                self._log_operation(
+                    "Производство",
+                    f"Зарезервированы материалы для станка ID {finished_good_id}",
+                    details=f"Модель: {machine_model or '-'}; " + "; ".join(reserved_lines)
+                )
+                return {"ok": True, "message": "Материалы отправлены в резерв."}
+            return {"ok": True, "message": "Нечего резервировать: либо всё уже в резерве, либо на складе пока нет свободных материалов."}
+        except Exception as e:
+            print(f"Ошибка резервирования материалов: {e}")
+            import traceback
+            traceback.print_exc()
+            return {"ok": False, "message": f"Ошибка резервирования: {e}"}
+
+    @Slot(int, result="QVariantMap")
+    def releaseReservedMaterialsForMachine(self, finished_good_id):
+        try:
+            if finished_good_id <= 0:
+                return {"ok": False, "message": "Не выбран станок."}
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    self._ensure_material_reservation_schema(cur)
+                    cur.execute("""
+                        SELECT machine_model
+                        FROM finished_goods
+                        WHERE id = %s AND status = 'in_progress'
+                    """, (finished_good_id,))
+                    fg_row = cur.fetchone()
+                    if not fg_row:
+                        return {"ok": False, "message": "Станок не найден или уже не в производстве."}
+                    machine_model = fg_row[0] or ""
+
+                    cur.execute("""
+                        SELECT material_id, purchase_id, quantity
+                        FROM finished_good_material_reservations
+                        WHERE finished_good_id = %s
+                        ORDER BY id
+                    """, (finished_good_id,))
+                    reservations = cur.fetchall()
+                    if not reservations:
+                        return {"ok": True, "message": "У этого станка нет резервов."}
+
+                    for material_id, purchase_id, quantity in reservations:
+                        qty_dec = Decimal(str(quantity or 0))
+                        if purchase_id:
+                            cur.execute("""
+                                UPDATE purchases
+                                SET remaining_quantity = COALESCE(remaining_quantity, 0) + %s
+                                WHERE id = %s
+                            """, (qty_dec, purchase_id))
+                        cur.execute("""
+                            INSERT INTO material_inventory (material_id, quantity)
+                            VALUES (%s, %s)
+                            ON CONFLICT (material_id) DO UPDATE
+                            SET quantity = material_inventory.quantity + EXCLUDED.quantity
+                        """, (material_id, qty_dec))
+                        cur.execute("""
+                            INSERT INTO material_transactions (material_id, quantity_change, transaction_type, reference_id)
+                            VALUES (%s, %s, 'reservation_release', %s)
+                        """, (material_id, qty_dec, finished_good_id))
+
+                    cur.execute("DELETE FROM finished_good_material_reservations WHERE finished_good_id = %s", (finished_good_id,))
+                    conn.commit()
+
+            self._log_operation(
+                "Производство",
+                f"Снят резерв материалов для станка ID {finished_good_id}",
+                details=f"Модель: {machine_model or '-'}"
+            )
+            return {"ok": True, "message": "Резерв материалов снят."}
+        except Exception as e:
+            print(f"Ошибка снятия резерва материалов: {e}")
+            import traceback
+            traceback.print_exc()
+            return {"ok": False, "message": f"Ошибка снятия резерва: {e}"}
 
 
     def _write_purchase_materials_excel(self, rows, filename_prefix):
@@ -3920,6 +4558,7 @@ class BackendController(QObject):
             self._ensure_indirect_schema()
             with get_connection() as conn:
                 with conn.cursor() as cur:
+                    self._ensure_material_reservation_schema(cur)
                     cur.execute("""
                         SELECT machine_id, machine_model
                         FROM finished_goods
@@ -3935,23 +4574,29 @@ class BackendController(QObject):
                             FROM purchases
                             WHERE price_per_unit IS NOT NULL
                             ORDER BY material_id, purchase_date DESC NULLS LAST, id DESC
+                        ), reserved AS (
+                            SELECT material_id, SUM(quantity) AS reserved_qty
+                            FROM finished_good_material_reservations
+                            WHERE finished_good_id = %s
+                            GROUP BY material_id
                         )
                         SELECT m.name,
                                COALESCE(m.unit, ''),
                                COALESCE(mm.quantity, 0) AS required_qty,
                                COALESCE(inv.quantity, 0) AS in_stock,
-                               GREATEST(COALESCE(mm.quantity, 0) - COALESCE(inv.quantity, 0), 0) AS to_buy,
+                               GREATEST(COALESCE(mm.quantity, 0) - COALESCE(res.reserved_qty, 0) - COALESCE(inv.quantity, 0), 0) AS to_buy,
                                COALESCE(lp.price_per_unit, 0) AS price_per_unit,
                                COALESCE(m.source, ''),
                                COALESCE(m.notes, '')
                         FROM machine_materials mm
                         JOIN materials m ON m.id = mm.material_id
+                        LEFT JOIN reserved res ON res.material_id = mm.material_id
                         LEFT JOIN material_inventory inv ON inv.material_id = mm.material_id
                         LEFT JOIN latest_prices lp ON lp.material_id = mm.material_id
                         WHERE mm.machine_id = %s
-                          AND GREATEST(COALESCE(mm.quantity, 0) - COALESCE(inv.quantity, 0), 0) > 0
+                          AND GREATEST(COALESCE(mm.quantity, 0) - COALESCE(res.reserved_qty, 0) - COALESCE(inv.quantity, 0), 0) > 0
                         ORDER BY to_buy DESC, m.name
-                    """, (machine_id,))
+                    """, (finished_good_id, machine_id))
                     rows = []
                     for name, unit, required_qty, in_stock, to_buy, price, source, notes in cur.fetchall():
                         required_qty = Decimal(str(required_qty or 0))
@@ -3983,6 +4628,7 @@ class BackendController(QObject):
             self._ensure_indirect_schema()
             with get_connection() as conn:
                 with conn.cursor() as cur:
+                    self._ensure_material_reservation_schema(cur)
                     cur.execute("""
                         WITH in_progress AS (
                             SELECT id, machine_id, machine_model
@@ -3995,6 +4641,10 @@ class BackendController(QObject):
                             FROM in_progress ip
                             JOIN machine_materials mm ON mm.machine_id = ip.machine_id
                             GROUP BY mm.material_id
+                        ), reserved_by_material AS (
+                            SELECT material_id, SUM(quantity) AS reserved_qty
+                            FROM finished_good_material_reservations
+                            GROUP BY material_id
                         ), latest_prices AS (
                             SELECT DISTINCT ON (material_id) material_id, price_per_unit
                             FROM purchases
@@ -4005,16 +4655,17 @@ class BackendController(QObject):
                                COALESCE(m.unit, ''),
                                COALESCE(r.required_qty, 0) AS required_qty,
                                COALESCE(inv.quantity, 0) AS in_stock,
-                               GREATEST(COALESCE(r.required_qty, 0) - COALESCE(inv.quantity, 0), 0) AS to_buy,
+                               GREATEST(COALESCE(r.required_qty, 0) - COALESCE(rb.reserved_qty, 0) - COALESCE(inv.quantity, 0), 0) AS to_buy,
                                COALESCE(lp.price_per_unit, 0) AS price_per_unit,
                                COALESCE(m.source, ''),
                                COALESCE(m.notes, ''),
                                COALESCE(r.machines, '')
                         FROM required_by_material r
                         JOIN materials m ON m.id = r.material_id
+                        LEFT JOIN reserved_by_material rb ON rb.material_id = r.material_id
                         LEFT JOIN material_inventory inv ON inv.material_id = r.material_id
                         LEFT JOIN latest_prices lp ON lp.material_id = r.material_id
-                        WHERE GREATEST(COALESCE(r.required_qty, 0) - COALESCE(inv.quantity, 0), 0) > 0
+                        WHERE GREATEST(COALESCE(r.required_qty, 0) - COALESCE(rb.reserved_qty, 0) - COALESCE(inv.quantity, 0), 0) > 0
                         ORDER BY to_buy DESC, m.name
                     """)
                     rows = []
@@ -4045,25 +4696,25 @@ class BackendController(QObject):
 
     @Slot(int, result=str)
     def getDisassemblePreview(self, finished_good_id):
-        """РџРѕРєР°Р·С‹РІР°РµС‚ РїСЂРµРґРїСЂРѕСЃРјРѕС‚СЂ С‡С‚Рѕ РІРµСЂРЅС‘С‚СЃСЏ РЅР° СЃРєР»Р°Рґ РїСЂРё СЂР°Р·Р±РѕСЂРєРµ."""
+        """Показывает предпросмотр что вернётся на склад при разборке."""
         try:
             with get_connection() as conn:
                 with conn.cursor() as cur:
-                    # РџРѕР»СѓС‡Р°РµРј РёРЅС„РѕСЂРјР°С†РёСЋ Рѕ СЃС‚Р°РЅРєРµ
+                    # Получаем информацию о станке
                     cur.execute("""
                         SELECT machine_model, machine_id FROM finished_goods WHERE id = %s
                     """, (finished_good_id,))
                     row = cur.fetchone()
                     if not row:
-                        return "РЎС‚Р°РЅРѕРє РЅРµ РЅР°Р№РґРµРЅ"
+                        return "Станок не найден"
                     
                     model, machine_id = row
                     
-                    preview = f"РЎС‚Р°РЅРѕРє: {model} (ID {finished_good_id})\n\n"
-                    preview += "РњРђРўР•Р РРђР›Р«, РљРћРўРћР Р«Р• Р’Р•Р РќРЈРўРЎРЇ РќРђ РЎРљР›РђР”:\n"
+                    preview = f"Станок: {model} (ID {finished_good_id})\n\n"
+                    preview += "MATERIALS THAT WILL RETURN TO STOCK:\n"
                     preview += "=" * 60 + "\n"
                     
-                    # РџРѕР»СѓС‡Р°РµРј РјР°С‚РµСЂРёР°Р»С‹ РёР· СЃРїРµС†РёС„РёРєР°С†РёРё
+                    # Получаем материалы из спецификации
                     cur.execute("""
                         SELECT 
                             m.name,
@@ -4080,9 +4731,9 @@ class BackendController(QObject):
                     materials = cur.fetchall()
                     
                     if not materials:
-                        preview += "РќРµС‚ РјР°С‚РµСЂРёР°Р»РѕРІ РґР»СЏ РІРѕР·РІСЂР°С‚Р°\n"
+                        preview += "Нет материалов для возврата\n"
                     else:
-                        preview += f"{'РњР°С‚РµСЂРёР°Р»':<35} {'Р’РµСЂРЅС‘С‚СЃСЏ':>10} {'РЎРµР№С‡Р°СЃ':>10} {'РЎС‚Р°РЅРµС‚':>10}\n"
+                        preview += f"{'Материал':<35} {'Вернётся':>10} {'Сейчас':>10} {'Станет':>10}\n"
                         preview += "-" * 60 + "\n"
                         
                         for name, qty, current, after in materials:
@@ -4102,34 +4753,34 @@ class BackendController(QObject):
                     labor_cost = cur.fetchone()[0] or Decimal('0')
                     
                     if labor_cost > 0:
-                        preview += f"\nР’РќРРњРђРќРР•: Р—Р°С‚СЂР°С‚С‹ РЅР° СЂР°Р±РѕС‚Сѓ ({labor_cost:.2f} в‚Ѕ) РќР• РІРѕР·РјРµС‰Р°СЋС‚СЃСЏ!\n"
+                        preview += f"\nWARNING: labor cost ({labor_cost:.2f} rub.) is not refunded!\n"
                     
-                    preview += "\nРЎС‚Р°РЅРѕРє Р±СѓРґРµС‚ СѓРґР°Р»С‘РЅ РёР· Р±Р°Р·С‹ РґР°РЅРЅС‹С…."
+                    preview += "\nСтанок будет удалён из базы данных."
                     
                     return preview
                     
         except Exception as e:
-            print(f"РћС€РёР±РєР° РїСЂРµРґРїСЂРѕСЃРјРѕС‚СЂР° СЂР°Р·Р±РѕСЂРєРё: {e}")
-            return f"РћС€РёР±РєР°: {str(e)}"
+            print(f"Ошибка предпросмотра разборки: {e}")
+            return f"Ошибка: {str(e)}"
 
     @Slot(int, result=bool)
     def disassembleMachine(self, finished_good_id):
-        """Р Р°Р·Р±РёСЂР°РµС‚ СЃС‚Р°РЅРѕРє Рё РІРѕР·РІСЂР°С‰Р°РµС‚ РјР°С‚РµСЂРёР°Р»С‹ РЅР° СЃРєР»Р°Рґ."""
+        """Разбирает станок и возвращает материалы на склад."""
         try:
             with get_connection() as conn:
                 with conn.cursor() as cur:
-                    # РџРѕР»СѓС‡Р°РµРј machine_id
+                    # Получаем machine_id
                     cur.execute("""
                         SELECT machine_id FROM finished_goods WHERE id = %s AND status = 'completed'
                     """, (finished_good_id,))
                     row = cur.fetchone()
                     if not row:
-                        print("РЎС‚Р°РЅРѕРє РЅРµ РЅР°Р№РґРµРЅ РёР»Рё СѓР¶Рµ РїСЂРѕРґР°РЅ")
+                        print("Станок не найден или уже продан")
                         return False
                     
                     machine_id = row[0]
                     
-                    # РџРѕР»СѓС‡Р°РµРј РјР°С‚РµСЂРёР°Р»С‹ РёР· СЃРїРµС†РёС„РёРєР°С†РёРё
+                    # Получаем материалы из спецификации
                     cur.execute("""
                         SELECT material_id, quantity
                         FROM machine_materials
@@ -4137,7 +4788,7 @@ class BackendController(QObject):
                     """, (machine_id,))
                     materials = cur.fetchall()
                     
-                    # Р’РѕР·РІСЂР°С‰Р°РµРј РјР°С‚РµСЂРёР°Р»С‹ РЅР° СЃРєР»Р°Рґ
+                    # Возвращаем материалы на склад
                     for material_id, quantity in materials:
                         cur.execute("""
                             INSERT INTO material_inventory (material_id, quantity)
@@ -4146,66 +4797,66 @@ class BackendController(QObject):
                             DO UPDATE SET quantity = material_inventory.quantity + EXCLUDED.quantity
                         """, (material_id, quantity))
                         
-                        # Р”РѕР±Р°РІР»СЏРµРј С‚СЂР°РЅР·Р°РєС†РёСЋ
+                        # Добавляем транзакцию
                         cur.execute("""
                             INSERT INTO material_transactions (material_id, quantity_change, transaction_type, reference_id)
                             VALUES (%s, %s, 'disassembly', %s)
                         """, (material_id, quantity, finished_good_id))
                     
-                    # РЈРґР°Р»СЏРµРј СЃРІСЏР·Рё СЃ Р°РјРѕСЂС‚РёР·Р°С†РёРµР№ РёРЅСЃС‚СЂСѓРјРµРЅС‚РѕРІ
+                    # Удаляем связи с амортизацией инструментов
                     cur.execute("DELETE FROM tool_depreciation WHERE finished_good_id = %s", (finished_good_id,))
                     
-                    # РЈРґР°Р»СЏРµРј СЃРІСЏР·Рё СЃ СЂР°Р±РѕС‚РѕР№
+                    # Удаляем связи с работой
                     cur.execute("DELETE FROM finished_good_labor WHERE finished_good_id = %s", (finished_good_id,))
                     
-                    # РЈРґР°Р»СЏРµРј СЃС‚Р°РЅРѕРє
+                    # Удаляем станок
                     cur.execute("DELETE FROM finished_goods WHERE id = %s", (finished_good_id,))
                     
                     conn.commit()
-                    print(f"РЎС‚Р°РЅРѕРє ID {finished_good_id} СЂР°Р·РѕР±СЂР°РЅ, РјР°С‚РµСЂРёР°Р»С‹ РІРѕР·РІСЂР°С‰РµРЅС‹ РЅР° СЃРєР»Р°Рґ")
+                    print(f"Станок ID {finished_good_id} разобран, материалы возвращены на склад")
                     
             return True
         except Exception as e:
-            print(f"РћС€РёР±РєР° СЂР°Р·Р±РѕСЂРєРё СЃС‚Р°РЅРєР°: {e}")
+            print(f"Ошибка разборки станка: {e}")
             import traceback
             traceback.print_exc()
             return False
 
     @Slot(int, result=bool)
     def deleteMachine(self, finished_good_id):
-        """РЈРґР°Р»СЏРµС‚ СЃС‚Р°РЅРѕРє Р‘Р•Р— РІРѕР·РІСЂР°С‚Р° РјР°С‚РµСЂРёР°Р»РѕРІ."""
+        """Удаляет станок БЕЗ возврата материалов."""
         try:
             with get_connection() as conn:
                 with conn.cursor() as cur:
-                    # РџСЂРѕРІРµСЂСЏРµРј С‡С‚Рѕ СЃС‚Р°РЅРѕРє РЅР° СЃРєР»Р°РґРµ
+                    # Проверяем что станок на складе
                     cur.execute("""
                         SELECT status FROM finished_goods WHERE id = %s
                     """, (finished_good_id,))
                     row = cur.fetchone()
                     if not row:
-                        print("РЎС‚Р°РЅРѕРє РЅРµ РЅР°Р№РґРµРЅ")
+                        print("Станок не найден")
                         return False
                     
                     if row[0] == 'sold':
-                        print("РќРµР»СЊР·СЏ СѓРґР°Р»РёС‚СЊ РїСЂРѕРґР°РЅРЅС‹Р№ СЃС‚Р°РЅРѕРє")
+                        print("Нельзя удалить проданный станок")
                         return False
                     
-                    # РЈРґР°Р»СЏРµРј СЃРІСЏР·Рё СЃ СЂР°Р±РѕС‚РѕР№
+                    # Удаляем связи с работой
                     cur.execute("""
                         DELETE FROM finished_good_labor WHERE finished_good_id = %s
                     """, (finished_good_id,))
                     
-                    # РЈРґР°Р»СЏРµРј СЃС‚Р°РЅРѕРє
+                    # Удаляем станок
                     cur.execute("""
                         DELETE FROM finished_goods WHERE id = %s
                     """, (finished_good_id,))
                     
                     conn.commit()
-                    print(f"РЎС‚Р°РЅРѕРє ID {finished_good_id} СѓРґР°Р»С‘РЅ")
+                    print(f"Станок ID {finished_good_id} удалён")
                     
             return True
         except Exception as e:
-            print(f"РћС€РёР±РєР° СѓРґР°Р»РµРЅРёСЏ СЃС‚Р°РЅРєР°: {e}")
+            print(f"Ошибка удаления станка: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -4466,7 +5117,7 @@ class BackendController(QObject):
             )
             return True
         except Exception as e:
-            print(f"?????? ????????? ????????? ????????: {e}")
+            print(f"Error recalculating indirect expenses: {e}")
             return False
 
     @Slot(str, result="QVariantList")
@@ -4520,6 +5171,76 @@ class BackendController(QObject):
             print(f"Ошибка получения косвенных расходов за период: {e}")
             return []
 
+    @Slot(str, str, result="QVariantMap")
+    def getIndirectIdleSummary(self, date_from_str, date_to_str):
+        try:
+            import calendar
+            from datetime import datetime, date, timedelta
+
+            self._ensure_indirect_schema()
+            date_from = datetime.strptime(date_from_str, "%Y-%m-%d").date() if date_from_str else date.today().replace(day=1)
+            date_to = datetime.strptime(date_to_str, "%Y-%m-%d").date() if date_to_str else date.today()
+            if date_to < date_from:
+                date_from, date_to = date_to, date_from
+
+            idle_days = 0
+            total_amount = Decimal("0.00")
+
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT COUNT(*)
+                        FROM indirect_expense_categories
+                        WHERE is_active = TRUE
+                    """)
+                    active_categories = int(cur.fetchone()[0] or 0)
+
+                    day = date_from
+                    while day <= date_to:
+                        cur.execute("""
+                            SELECT COUNT(*)
+                            FROM finished_goods
+                            WHERE start_date <= %s
+                              AND (
+                                  (status = 'in_progress' AND %s <= CURRENT_DATE)
+                                  OR
+                                  (status <> 'in_progress' AND produced_date IS NOT NULL AND produced_date >= %s)
+                              )
+                        """, (day, day, day))
+                        machine_count = int(cur.fetchone()[0] or 0)
+                        if machine_count == 0:
+                            idle_days += 1
+                            cur.execute("""
+                                SELECT monthly_amount
+                                FROM indirect_expense_categories
+                                WHERE is_active = TRUE
+                            """)
+                            for row in cur.fetchall():
+                                monthly_amount = Decimal(str(row[0] or 0))
+                                days_in_month = calendar.monthrange(day.year, day.month)[1]
+                                total_amount += monthly_amount / Decimal(days_in_month)
+                        day += timedelta(days=1)
+
+            return {
+                "ok": True,
+                "idle_days": idle_days,
+                "amount": float(total_amount.quantize(Decimal("0.01"))),
+                "date_from": str(date_from),
+                "date_to": str(date_to),
+                "active_categories": active_categories,
+            }
+        except Exception as e:
+            print(f"Ошибка расчёта простоя по косвенным расходам: {e}")
+            return {
+                "ok": False,
+                "idle_days": 0,
+                "amount": 0.0,
+                "date_from": date_from_str or "",
+                "date_to": date_to_str or "",
+                "active_categories": 0,
+                "message": f"Ошибка расчёта простоя: {e}",
+            }
+
     @Slot(int, result="QVariantList")
     def getMachineIndirectCostDetails(self, finished_good_id):
         try:
@@ -4551,8 +5272,8 @@ class BackendController(QObject):
                 df_production = pd.read_sql_query("SELECT * FROM finished_goods WHERE produced_date BETWEEN %s AND %s", conn, params=(start, end))
                 filename = f"report_{start}_{end}.xlsx"
                 with pd.ExcelWriter(filename) as writer:
-                    df_sales.to_excel(writer, sheet_name="РџСЂРѕРґР°Р¶Рё", index=False)
-                    df_production.to_excel(writer, sheet_name="РџСЂРѕРёР·РІРѕРґСЃС‚РІРѕ", index=False)
-            print(f"РћС‚С‡С‘С‚ СЃРѕС…СЂР°РЅС‘РЅ РІ {filename}")
+                    df_sales.to_excel(writer, sheet_name="Продажи", index=False)
+                    df_production.to_excel(writer, sheet_name="Производство", index=False)
+            print(f"Отчёт сохранён в {filename}")
         except Exception as e:
-            print(f"РћС€РёР±РєР° СЌРєСЃРїРѕСЂС‚Р°: {e}")
+            print(f"Ошибка экспорта: {e}")

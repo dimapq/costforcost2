@@ -67,7 +67,7 @@ Page {
                     ComboBox {
                         id: employeeComboWorkLog
                         Layout.fillWidth: true
-                        model: backend.getEmployeesList()
+                        model: backend ? backend.getEmployeesList() : []
                         textRole: "name"
                         valueRole: "id"
                     }
@@ -178,7 +178,7 @@ Page {
 
                     ColumnLayout {
                         anchors.centerIn: parent
-                        Label { text: "Инструменты"; font.bold: true }
+                        Label { text: "Tools"; font.bold: true }
                         Label {
                             id: toolsValue
                             text: backend.getToolsSummary() || "0.00"
@@ -284,3 +284,4 @@ Page {
 
     Component.onCompleted: summaryTimer.start()
 }
+

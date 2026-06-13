@@ -32,6 +32,24 @@ def init_db():
         )
         """,
         """
+        CREATE TABLE IF NOT EXISTS composite_material_recipes (
+            id SERIAL PRIMARY KEY,
+            output_material_id INT NOT NULL UNIQUE REFERENCES materials(id) ON DELETE CASCADE,
+            output_quantity DECIMAL(12, 4) NOT NULL DEFAULT 1,
+            notes TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS composite_material_recipe_items (
+            id SERIAL PRIMARY KEY,
+            recipe_id INT NOT NULL REFERENCES composite_material_recipes(id) ON DELETE CASCADE,
+            material_id INT NOT NULL REFERENCES materials(id),
+            quantity DECIMAL(12, 4) NOT NULL DEFAULT 0
+        )
+        """,
+        """
         ALTER TABLE material_conversions ADD COLUMN IF NOT EXISTS source_purchase_id INT REFERENCES purchases(id)
         """,
         """
@@ -43,6 +61,18 @@ def init_db():
             produced_date DATE DEFAULT CURRENT_DATE,
             status VARCHAR(20) DEFAULT 'in_stock',
             notes TEXT
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS finished_good_material_reservations (
+            id SERIAL PRIMARY KEY,
+            finished_good_id INT REFERENCES finished_goods(id) ON DELETE CASCADE,
+            material_id INT REFERENCES materials(id),
+            purchase_id INT REFERENCES purchases(id),
+            quantity DECIMAL(12, 4) NOT NULL DEFAULT 0,
+            amount DECIMAL(12, 2) NOT NULL DEFAULT 0,
+            is_cash BOOLEAN DEFAULT FALSE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
         """,
         """
@@ -192,6 +222,9 @@ ALTER TABLE balance ADD COLUMN IF NOT EXISTS is_cash BOOLEAN DEFAULT FALSE;
 ALTER TABLE purchases ADD COLUMN IF NOT EXISTS is_cash BOOLEAN DEFAULT FALSE;""",
 """
 ALTER TABLE materials ADD COLUMN IF NOT EXISTS updated_date DATE DEFAULT CURRENT_DATE;
+""",
+"""
+ALTER TABLE materials ADD COLUMN IF NOT EXISTS category VARCHAR(100) DEFAULT 'Материалы';
 """,
     ]
     with get_connection() as conn:

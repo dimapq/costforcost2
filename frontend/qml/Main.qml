@@ -13,6 +13,37 @@ ApplicationWindow {
     property string connectionMessage: ""
     property string settingsActionMessage: ""
     property string settingsActionPath: ""
+    property var backendObj: (typeof backend !== "undefined") ? backend : null
+    property var updateManagerObj: (typeof updateManager !== "undefined") ? updateManager : null
+    property string userManualText: "User Manual\n\n"
+        + "1. General workflow\n"
+        + "The app tracks materials, machines, employees, operations, and finances. Typical workflow: fill the warehouse, configure machine models, start production, add labor and expenses, finish production, and review finance results.\n\n"
+        + "2. Operations tab\n"
+        + "Quick actions, work time entry, last operations log, and warehouse summary.\n\n"
+        + "3. Warehouse -> Materials\n"
+        + "Main material stock. You can add, edit, recount, and review where each material is used.\n\n"
+        + "4. Warehouse -> Composite materials\n"
+        + "Create recipes from several components and produce a composite material.\n\n"
+        + "5. Warehouse -> Plate cutting\n"
+        + "Manage plate materials, templates, drawings, process files, and produce parts from specific plates.\n\n"
+        + "6. Warehouse -> Tools\n"
+        + "Tool inventory, write-off, and depreciation.\n\n"
+        + "7. Employees\n"
+        + "Employees, rates, job history, salary, bonus, and settlements.\n\n"
+        + "8. Machines -> Model editor\n"
+        + "Configure bill of materials, norms, tools, and other parameters for each machine model.\n\n"
+        + "9. Machines -> In progress\n"
+        + "Reserve materials, add labor, monitor indirect expenses, cancel or finish production.\n\n"
+        + "10. Machines -> In stock\n"
+        + "Finished but unsold machines with cost details and production dates.\n\n"
+        + "11. Machines -> Sold\n"
+        + "Sold machines, sale date, customer, sale price, profit, and tax cost values.\n\n"
+        + "12. Finance\n"
+        + "Profit and loss, taxes, indirect expenses, and other expenses.\n\n"
+        + "13. Settings\n"
+        + "Database connection, full Excel export, SQL dump, update check, and this manual.\n\n"
+        + "14. Recommended start\n"
+        + "Check database connection first, then fill warehouse, employees, and machine models."
 
     header: ToolBar {
         RowLayout {
@@ -74,6 +105,13 @@ ApplicationWindow {
         MenuSeparator { }
 
         MenuItem {
+            text: "Руководство пользователя"
+            onTriggered: userManualDialog.open()
+        }
+
+        MenuSeparator { }
+
+        MenuItem {
             text: "Выгрузка всей БД в Excel"
             onTriggered: {
                 var result = backend.exportFullDatabaseToExcel()
@@ -86,7 +124,7 @@ ApplicationWindow {
         MenuItem {
             text: "Дамп всей базы для экспорта"
             onTriggered: {
-                var result = backend.exportDatabaseDump()
+                var result = backendObj ? backendObj.exportDatabaseDump() : {"message": "Backend недоступен", "path": ""}
                 root.settingsActionMessage = result.message || ""
                 root.settingsActionPath = result.path || ""
                 settingsResultDialog.open()
@@ -96,7 +134,7 @@ ApplicationWindow {
 
         MenuItem {
             text: "\u041f\u0440\u043e\u0432\u0435\u0440\u0438\u0442\u044c \u043e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u0438\u044f"
-            onTriggered: updateManager.checkForUpdates(true)
+            onTriggered: { if (updateManagerObj) updateManagerObj.checkForUpdates(true) }
         }
     }
 
@@ -240,7 +278,7 @@ ApplicationWindow {
         y: Math.round((root.height - height) / 2)
         width: Math.min(root.width - 40, 470)
         padding: 16
-        closePolicy: updateManager.busy ? Popup.NoAutoClose : Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        closePolicy: updateManagerObj && updateManagerObj.busy ? Popup.NoAutoClose : Popup.CloseOnEscape | Popup.CloseOnPressOutside
 
         background: Rectangle {
             radius: 12
@@ -270,10 +308,10 @@ ApplicationWindow {
                     spacing: 4
 
                     Label {
-                        text: updateManager.busy
+                        text: updateManagerObj && updateManagerObj.busy
                               ? "Обновление " + appTitle
-                              : (updateManager.updateAvailable
-                                 ? "Доступно обновление " + updateManager.latestVersion
+                              : (updateManagerObj && updateManagerObj.updateAvailable
+                                 ? "Доступно обновление " + updateManagerObj.latestVersion
                                  : "Проверка обновлений")
                         font.pixelSize: 20
                         font.bold: true
@@ -282,7 +320,7 @@ ApplicationWindow {
                     }
 
                     Label {
-                        text: "Текущая версия: " + appVersionLabel + (updateManager.latestVersion ? ("    Новая: v" + updateManager.latestVersion) : "")
+                        text: "Текущая версия: " + appVersionLabel + ((updateManagerObj && updateManagerObj.latestVersion) ? ("    Новая: v" + updateManagerObj.latestVersion) : "")
                         color: "#666"
                         Layout.fillWidth: true
                         wrapMode: Text.WordWrap
@@ -291,23 +329,23 @@ ApplicationWindow {
             }
 
             Label {
-                text: updateManager.statusMessage
+                text: updateManagerObj ? updateManagerObj.statusMessage : ""
                 visible: text.length > 0
                 Layout.fillWidth: true
                 wrapMode: Text.WordWrap
-                color: updateManager.statusMessage.indexOf("Ошибка") >= 0 ? "#b23b3b" : "#2f2f2f"
+                color: text.indexOf("Ошибка") >= 0 ? "#b23b3b" : "#2f2f2f"
             }
 
             ProgressBar {
-                visible: updateManager.busy && updateManager.progress >= 0
+                visible: updateManagerObj && updateManagerObj.busy && updateManagerObj.progress >= 0
                 Layout.fillWidth: true
                 from: 0
                 to: 100
-                value: Math.max(0, updateManager.progress)
+                value: Math.max(0, updateManagerObj ? updateManagerObj.progress : 0)
             }
 
             Label {
-                text: updateManager.releaseNotes.length > 0 ? ("\u0427\u0442\u043e \u0438\u0437\u043c\u0435\u043d\u0438\u043b\u043e\u0441\u044c:\n" + updateManager.releaseNotes) : ""
+                text: updateManagerObj && updateManagerObj.releaseNotes.length > 0 ? ("\u0427\u0442\u043e \u0438\u0437\u043c\u0435\u043d\u0438\u043b\u043e\u0441\u044c:\n" + updateManagerObj.releaseNotes) : ""
                 visible: text.length > 0
                 Layout.fillWidth: true
                 wrapMode: Text.WordWrap
@@ -320,18 +358,18 @@ ApplicationWindow {
 
                 Button {
                     text: "Закрыть"
-                    visible: !updateManager.busy && !updateManager.updateAvailable && updateManager.statusMessage.length > 0
+                    visible: updateManagerObj && !updateManagerObj.busy && !updateManagerObj.updateAvailable && updateManagerObj.statusMessage.length > 0
                     onClicked: {
-                        updateManager.dismissStatus()
+                        if (updateManagerObj) updateManagerObj.dismissStatus()
                         updatePopup.close()
                     }
                 }
 
                 Button {
                     text: "Позже"
-                    visible: updateManager.updateAvailable && !updateManager.busy
+                    visible: updateManagerObj && updateManagerObj.updateAvailable && !updateManagerObj.busy
                     onClicked: {
-                        updateManager.dismissStatus()
+                        if (updateManagerObj) updateManagerObj.dismissStatus()
                         updatePopup.close()
                     }
                 }
@@ -339,29 +377,65 @@ ApplicationWindow {
                 Button {
                     text: "Обновить сейчас"
                     highlighted: true
-                    visible: updateManager.updateAvailable && !updateManager.busy
-                    onClicked: updateManager.downloadAndInstallUpdate()
+                    visible: updateManagerObj && updateManagerObj.updateAvailable && !updateManagerObj.busy
+                    onClicked: { if (updateManagerObj) updateManagerObj.downloadAndInstallUpdate() }
                 }
             }
         }
     }
 
     Connections {
-        target: updateManager
+        target: updateManagerObj
 
         function onBusyChanged() {
-            if (updateManager.busy)
+            if (updateManagerObj && updateManagerObj.busy)
                 updatePopup.open()
         }
 
         function onUpdateAvailableChanged() {
-            if (updateManager.updateAvailable)
+            if (updateManagerObj && updateManagerObj.updateAvailable)
                 updatePopup.open()
         }
 
         function onStatusMessageChanged() {
-            if (updateManager.statusMessage.length > 0)
+            if (updateManagerObj && updateManagerObj.statusMessage.length > 0)
                 updatePopup.open()
+        }
+    }
+
+    Dialog {
+        id: userManualDialog
+        title: "Руководство пользователя"
+        modal: true
+        width: Math.min(root.width - 40, 900)
+        height: Math.min(root.height - 40, 760)
+
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 10
+
+            ScrollView {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                clip: true
+
+                TextArea {
+                    readOnly: true
+                    wrapMode: TextEdit.Wrap
+                    text: root.userManualText
+                    textFormat: TextEdit.PlainText
+                    selectByMouse: true
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                Item { Layout.fillWidth: true }
+                Button {
+                    text: "Закрыть"
+                    onClicked: userManualDialog.close()
+                }
+            }
         }
     }
 
@@ -382,7 +456,7 @@ ApplicationWindow {
             }
 
             Label {
-                text: root.settingsActionPath.length > 0 ? ("Файл: " + root.settingsActionPath) : ""
+                text: root.settingsActionPath.length > 0 ? ("Р¤Р°Р№Р»: " + root.settingsActionPath) : ""
                 visible: root.settingsActionPath.length > 0
                 color: "#555"
                 wrapMode: Text.WordWrap
@@ -401,7 +475,7 @@ ApplicationWindow {
     }
 
     function loadDatabaseConfig() {
-        var cfg = backend.getDatabaseConfig()
+        var cfg = backendObj ? backendObj.getDatabaseConfig() : {}
         dbHostField.text = cfg.host || "localhost"
         dbPortField.text = cfg.port || "5432"
         dbNameField.text = cfg.name || "cost"
@@ -412,15 +486,19 @@ ApplicationWindow {
 
     Component.onCompleted: {
         loadDatabaseConfig()
-        var cfg = backend.getDatabaseConfig()
-        if (cfg.connection_confirmed && backend.testDatabaseConfig(cfg.host, cfg.port, cfg.name, cfg.user, cfg.password).ok) {
+        var cfg = backendObj ? backendObj.getDatabaseConfig() : {}
+        if (backendObj && cfg.connection_confirmed && backendObj.testDatabaseConfig(cfg.host, cfg.port, cfg.name, cfg.user, cfg.password).ok) {
             root.connectionReady = true
         } else {
             root.connectionReady = false
             root.connectionMessage = cfg.connection_confirmed ? "Не удалось подключиться. Проверьте параметры." : "Первое подключение: проверьте данные из config.ini."
             connectionDialog.open()
         }
-        if (updateManager.enabled)
-            updateManager.checkForUpdates(false)
+        if (updateManagerObj && updateManagerObj.enabled)
+            updateManagerObj.checkForUpdates(false)
     }
 }
+
+
+
+

@@ -1,4 +1,4 @@
-﻿import QtQuick
+import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import TableModels 1.0
@@ -29,6 +29,7 @@ Page {
             property int selectedRow: -1
             property string selectedInProgressInventoryNumber: ""
             property string exportMessage: ""
+            property string reservationMessage: ""
 
             InProgressModel { id: inProgressModel }
 
@@ -145,6 +146,26 @@ Page {
                                 onClicked: completeDialog.open()
                             }
                             Button {
+                                text: "В резерв"
+                                enabled: tab1Root.selectedInProgressId > 0
+                                onClicked: {
+                                    var result = backend.reserveMaterialsForMachine(tab1Root.selectedInProgressId)
+                                    tab1Root.reservationMessage = result && result.message ? result.message : ""
+                                    inProgressModel.refresh()
+                                    materialsCheckList.loadMaterialsCheck(tab1Root.selectedInProgressId)
+                                }
+                            }
+                            Button {
+                                text: "Снять резерв"
+                                enabled: tab1Root.selectedInProgressId > 0
+                                onClicked: {
+                                    var result = backend.releaseReservedMaterialsForMachine(tab1Root.selectedInProgressId)
+                                    tab1Root.reservationMessage = result && result.message ? result.message : ""
+                                    inProgressModel.refresh()
+                                    materialsCheckList.loadMaterialsCheck(tab1Root.selectedInProgressId)
+                                }
+                            }
+                            Button {
                                 text: "Отменить производство"
                                 enabled: tab1Root.selectedInProgressId > 0
                                 onClicked: cancelProductionDialog.open()
@@ -166,7 +187,7 @@ Page {
                             }
                             Label {
                                 visible: tab1Root.selectedInProgressId > 0 && !materialsCheckList.allMaterialsAvailable
-                                text: "Не все материалы доступны"
+                                text: "Не все материалы в резерве"
                                 color: "#d9534f"
                                 font.bold: true
                             }
@@ -176,6 +197,13 @@ Page {
                             visible: tab1Root.exportMessage.length > 0
                             text: tab1Root.exportMessage
                             color: "#2f6f3e"
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                        }
+                        Label {
+                            visible: tab1Root.reservationMessage.length > 0
+                            text: tab1Root.reservationMessage
+                            color: tab1Root.reservationMessage.indexOf("Ошибка") >= 0 ? "#d9534f" : "#2f6f3e"
                             wrapMode: Text.WordWrap
                             Layout.fillWidth: true
                         }
@@ -212,9 +240,9 @@ Page {
                                 anchors.fill: parent
                                 spacing: 0
                                 Repeater {
-                                    model: ["Материал", "Требуется", "На складе", "Доступно"]
+                                    model: ["Материал", "Требуется", "В резерве", "На складе", "Статус"]
                                     Rectangle {
-                                        width: index === 0 ? 200 : index === 1 ? 100 : index === 2 ? 100 : 100
+                                        width: index === 0 ? 190 : index === 1 ? 90 : index === 2 ? 90 : index === 3 ? 90 : 110
                                         height: 35
                                         border.width: 0
                                         color: "transparent"
@@ -247,15 +275,15 @@ Page {
                                     width: materialsCheckList.width
                                     height: 40
                                     border.color: "#ddd"
-                                    color: model.available ? "#d4edda" : "#f8d7da"
+                                    color: model.status_key === "reserved" ? "#d4edda" : (model.status_key === "enough" ? "#fff3cd" : "#f8d7da")
 
                                     Row {
                                         anchors.fill: parent
                                         spacing: 0
 
-                                        // Р СљР В°РЎвЂљР ВµРЎР‚Р С‘Р В°Р В»
+                                        // Материал
                                         Rectangle {
-                                            width: 200
+                                            width: 190
                                             height: 40
                                             color: "transparent"
                                             Text {
@@ -269,9 +297,9 @@ Page {
                                             }
                                         }
 
-                                        // Р СћРЎР‚Р ВµР В±РЎС“Р ВµРЎвЂљРЎРѓРЎРЏ
+                                        // Требуется
                                         Rectangle {
-                                            width: 100
+                                            width: 90
                                             height: 40
                                             color: "transparent"
                                             Text {
@@ -282,31 +310,43 @@ Page {
                                             }
                                         }
 
-                                        // Р вЂ™ Р Р…Р В°Р В»Р С‘РЎвЂЎР С‘Р С‘
+                                        // В наличии
                                         Rectangle {
-                                            width: 100
+                                            width: 90
+                                            height: 40
+                                            color: "transparent"
+                                            Text {
+                                                anchors.centerIn: parent
+                                                text: model.reserved.toFixed(2)
+                                                font.pixelSize: 13
+                                                color: model.status_key === "reserved" ? "#1f7a3d" : "#856404"
+                                                font.bold: true
+                                            }
+                                        }
+
+                                        Rectangle {
+                                            width: 90
                                             height: 40
                                             color: "transparent"
                                             Text {
                                                 anchors.centerIn: parent
                                                 text: model.in_stock.toFixed(2)
                                                 font.pixelSize: 13
-                                                color: model.available ? "#28a745" : "#dc3545"
+                                                color: model.status_key === "shortage" ? "#dc3545" : "#333"
                                                 font.bold: true
                                             }
                                         }
 
-                                        // Р РЋРЎвЂљР В°РЎвЂљРЎС“РЎРѓ
                                         Rectangle {
-                                            width: 100
+                                            width: 110
                                             height: 40
                                             color: "transparent"
                                             Text {
                                                 anchors.centerIn: parent
-                                                text: model.available ? "OK" : "Не хватает"
+                                                text: model.status_text
                                                 font.pixelSize: 13
                                                 font.bold: true
-                                                color: model.available ? "#28a745" : "#dc3545"
+                                                color: model.status_key === "reserved" ? "#1f7a3d" : (model.status_key === "enough" ? "#856404" : "#dc3545")
                                             }
                                         }
                                     }
@@ -347,16 +387,17 @@ Page {
                         GroupBox {
                             Layout.fillWidth: true
                             visible: tab1Root.selectedInProgressId > 0 && !materialsCheckList.allMaterialsAvailable
-                            title: "Проверка материалов"
+                            title: "Статус материалов"
 
                             ColumnLayout {
                                 anchors.fill: parent
                                 spacing: 5
 
                                 Label {
-                                    text: "Не хватает материалов для завершения станка."
+                                    text: "Для завершения производства все материалы должны быть в резерве. Жёлтые позиции можно зарезервировать со склада, красные нужно докупить."
                                     font.bold: true
                                     color: "#d9534f"
+                                    wrapMode: Text.WordWrap
                                 }
 
                                 Label {
@@ -453,7 +494,7 @@ Page {
                 currentIndex: bar.currentIndex === 2 ? 1 : 0
 
 
-                // ========== Р СџР С›Р вЂќР вЂ™Р С™Р вЂєР С’Р вЂќР С™Р С’: Р СњР С’ Р РЋР С™Р вЂєР С’Р вЂќР вЂў ==========
+                // ========== ПОДВКЛАДКА: НА СКЛАДЕ ==========
                 Item {
                     ColumnLayout {
                         anchors.fill: parent
@@ -489,7 +530,7 @@ Page {
                                 width: inStockSearchField.width + 200
                                 spacing: 0
 
-                                // Р вЂ”Р В°Р С–Р С•Р В»Р С•Р Р†Р С•Р С” РЎвЂљР В°Р В±Р В»Р С‘РЎвЂ РЎвЂ№
+                                // Заголовок таблицы
                                 Rectangle {
                                     Layout.fillWidth: true
                                     height: 35
@@ -517,7 +558,7 @@ Page {
                                     }
                                 }
 
-                                // Р вЂќР В°Р Р…Р Р…РЎвЂ№Р Вµ
+                                // Данные
                                 Repeater {
                                     model: finishedModel
                                     
@@ -548,7 +589,7 @@ Page {
                                                 }
                                             }
 
-                                            // Р СљР С•Р Т‘Р ВµР В»РЎРЉ
+                                            // Модель
                                             Rectangle {
                                                 width: 200
                                                 height: 40
@@ -586,7 +627,7 @@ Page {
                                                 }
                                             }
 
-                                            // Р вЂќР В°РЎвЂљР В°
+                                            // Р”Р°С‚Р°
                                             Rectangle {
                                                 width: 120
                                                 height: 40
@@ -598,7 +639,7 @@ Page {
                                                 }
                                             }
 
-                                            // Р СљР В°РЎвЂљР ВµРЎР‚Р С‘Р В°Р В»РЎвЂ№
+                                            // Материалы
                                             Rectangle {
                                                 width: 120
                                                 height: 40
@@ -611,7 +652,7 @@ Page {
                                                 }
                                             }
 
-                                            // Р В Р В°Р В±Р С•РЎвЂљР В°
+                                            // Работа
                                             Rectangle {
                                                 width: 120
                                                 height: 40
@@ -715,7 +756,7 @@ Page {
                     }
                 }
 
-                // ========== Р СџР С›Р вЂќР вЂ™Р С™Р вЂєР С’Р вЂќР С™Р С’: Р СџР В Р С›Р вЂќР С’Р СњР СњР В«Р вЂў ==========
+                // ========== ПОДВКЛАДКА: ПРОДАННЫЕ ==========
                 Item {
                     id: soldTab
                     property int selectedSoldId: -1
@@ -745,7 +786,7 @@ Page {
                             }
                         }
 
-                        // Р вЂ”Р В°Р С–Р С•Р В»Р С•Р Р†Р С•Р С” РЎвЂљР В°Р В±Р В»Р С‘РЎвЂ РЎвЂ№
+                        // Заголовок таблицы
                         Rectangle {
                             Layout.fillWidth: true
                             height: 30
@@ -918,7 +959,7 @@ Page {
                             color: "#666"
                         }
 
-                        // Р С™Р СњР С›Р СџР С™Р С’ Р вЂ™Р С›Р вЂ”Р вЂ™Р В Р С’Р СћР С’
+                        // КНОПКА ВОЗВРАТА
                         RowLayout {
                             Layout.fillWidth: true
                             Button {
@@ -1316,13 +1357,13 @@ Page {
                     Label { text: "Дата начала производства (ГГГГ-ММ-ДД):" }
                     TextField { id: editFinishedStartDateField; Layout.fillWidth: true; placeholderText: "2026-04-01" }
 
-                    Label { text: "Дата окончания производства (ГГГГ-ММ-ДД):" }
+                    Label { text: "Production end date (YYYY-MM-DD):" }
                     TextField { id: editFinishedDateField; Layout.fillWidth: true; placeholderText: "2026-04-28" }
 
-                    Label { text: "Себестоимость:" }
+                    Label { text: "Cost price:" }
                     TextField { id: editFinishedCostField; Layout.fillWidth: true; validator: DoubleValidator { bottom: 0 } }
 
-                    Label { text: "Косвенные расходы:" }
+                    Label { text: "Indirect expenses:" }
                     TextField { id: editFinishedIndirectField; Layout.fillWidth: true; validator: DoubleValidator { bottom: 0 } }
 
                     Label { text: "Примечание:" }
@@ -1404,7 +1445,7 @@ Page {
             }
         }
         
-        // ================= Р вЂ™Р С™Р вЂєР С’Р вЂќР С™Р С’ 3: Р В Р вЂўР вЂќР С’Р С™Р СћР С›Р В  Р СљР С›Р вЂќР вЂўР вЂєР вЂўР в„ў =================
+        // ================= ВКЛАДКА 3: РЕДАКТОР МОДЕЛЕЙ =================
         Item {
             id: tab3Root
             property int selectedMachineId: -1
@@ -1575,7 +1616,7 @@ Page {
                     }
                 }
 
-                // Р СџРЎР‚Р В°Р Р†Р В°РЎРЏ РЎвЂЎР В°РЎРѓРЎвЂљРЎРЉ РІР‚вЂќ РЎРѓР С—Р ВµРЎвЂ Р С‘РЎвЂћР С‘Р С”Р В°РЎвЂ Р С‘РЎРЏ
+                // Правая часть — спецификация
                 ColumnLayout {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
@@ -1586,7 +1627,7 @@ Page {
                         font.bold: true
                     }
 
-                    // Р вЂ”Р В°Р С–Р С•Р В»Р С•Р Р†Р С•Р С” РЎвЂљР В°Р В±Р В»Р С‘РЎвЂ РЎвЂ№ РЎРѓР С—Р ВµРЎвЂ Р С‘РЎвЂћР С‘Р С”Р В°РЎвЂ Р С‘Р С‘
+                    // Заголовок таблицы спецификации
                     Rectangle {
                         Layout.fillWidth: true
                         height: 30
@@ -1919,3 +1960,4 @@ Page {
         }
     }
 }
+
