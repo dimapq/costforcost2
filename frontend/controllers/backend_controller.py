@@ -7,6 +7,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, Slot
 from decimal import Decimal
+from psycopg2 import sql
 
 from backend.models.labor import add_labor_to_finished_good
 from backend.models.inventory import get_materials_summary
@@ -18,6 +19,13 @@ from backend.db.connection import get_connection
 
 
 class BackendController(QObject):
+    def _resolve_sslmode(self, host, sslmode=""):
+        value = str(sslmode or "").strip()
+        if value:
+            return value
+        host_value = str(host or "").strip().lower()
+        return "disable" if host_value in ("", "localhost", "127.0.0.1", "::1") else "require"
+
     @Slot(result="QVariantMap")
     def getDatabaseConfig(self):
         try:
@@ -30,6 +38,8 @@ class BackendController(QObject):
                 "name": db.get('name', 'cost'),
                 "user": db.get('user', 'postgres'),
                 "password": db.get('password', ''),
+                "sslmode": self._resolve_sslmode(db.get('host', 'localhost'), db.get('sslmode', '')),
+                "sslrootcert": db.get('sslrootcert', ''),
                 "config_path": str(get_config_path()),
                 "connection_confirmed": is_connection_confirmed()
             }
@@ -41,6 +51,8 @@ class BackendController(QObject):
                 "name": "cost",
                 "user": "postgres",
                 "password": "",
+                "sslmode": "disable",
+                "sslrootcert": "",
                 "config_path": "config.ini",
                 "connection_confirmed": False
             }
@@ -64,7 +76,8 @@ class BackendController(QObject):
                 user=(user or 'postgres').strip(),
                 password=password or '',
                 connect_timeout=3,
-                options='-c client_encoding=utf8'
+                options='-c client_encoding=utf8',
+                sslmode=self._resolve_sslmode(host)
             )
             with conn:
                 with conn.cursor() as cur:
@@ -119,6 +132,23 @@ class BackendController(QObject):
         search_masks = [
             r"C:\Program Files\PostgreSQL\*\bin\pg_dump.exe",
             r"C:\Program Files (x86)\PostgreSQL\*\bin\pg_dump.exe",
+        ]
+        matches = []
+        for mask in search_masks:
+            matches.extend(glob.glob(mask))
+        if not matches:
+            return ""
+        matches.sort(reverse=True)
+        return matches[0]
+
+    def _find_psql_path(self):
+        direct_path = shutil.which("psql") or shutil.which("psql.exe")
+        if direct_path:
+            return direct_path
+
+        search_masks = [
+            r"C:\Program Files\PostgreSQL\*\bin\psql.exe",
+            r"C:\Program Files (x86)\PostgreSQL\*\bin\psql.exe",
         ]
         matches = []
         for mask in search_masks:
@@ -374,6 +404,11 @@ class BackendController(QObject):
             filepath = self._build_timestamped_path("database_dump").with_suffix(".sql")
             env = os.environ.copy()
             env["PGPASSWORD"] = db_config["password"]
+            env["PGCLIENTENCODING"] = "UTF8"
+            env["PGSSLMODE"] = self._resolve_sslmode(db_config["host"], db_config.get("sslmode", ""))
+            sslrootcert = str(db_config.get("sslrootcert", "") or "").strip()
+            if sslrootcert:
+                env["PGSSLROOTCERT"] = sslrootcert
 
             command = [
                 pg_dump_path,
@@ -389,6 +424,8 @@ class BackendController(QObject):
                 command,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 env=env,
                 timeout=180
             )
@@ -410,6 +447,155 @@ class BackendController(QObject):
             return {
                 "ok": False,
                 "message": f"Ошибка создания дампа базы: {e}",
+                "path": ""
+            }
+
+    @Slot(str, result="QVariantMap")
+    def importDatabaseDump(self, dump_path):
+        try:
+            from backend.db.config import get_db_config
+            from backend.db.schema import init_db
+
+            source_path = Path(dump_path or "").expanduser()
+            if not source_path.exists() or not source_path.is_file():
+                return {
+                    "ok": False,
+                    "message": "\u0424\u0430\u0439\u043b \u0434\u0430\u043c\u043f\u0430 \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d.",
+                    "path": str(source_path)
+                }
+
+            psql_path = self._find_psql_path()
+            if not psql_path:
+                return {
+                    "ok": False,
+                    "message": "\u041d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d psql. \u0423\u0441\u0442\u0430\u043d\u043e\u0432\u0438\u0442\u0435 PostgreSQL client tools \u0438\u043b\u0438 \u0434\u043e\u0431\u0430\u0432\u044c\u0442\u0435 psql \u0432 PATH.",
+                    "path": str(source_path)
+                }
+
+            import_path = source_path
+            normalized_dump_path = None
+            dump_text = source_path.read_text(encoding="utf-8", errors="replace")
+            if "\n\\restrict " in dump_text or "\n\\unrestrict " in dump_text or dump_text.startswith("\\restrict "):
+                normalized_lines = []
+                for line in dump_text.splitlines():
+                    if line.startswith("\\restrict ") or line.startswith("\\unrestrict "):
+                        continue
+                    normalized_lines.append(line)
+                normalized_dump_path = self._build_timestamped_path("database_dump_import").with_suffix(".sql")
+                normalized_dump_path.write_text("\n".join(normalized_lines) + "\n", encoding="utf-8")
+                import_path = normalized_dump_path
+
+            db_config = get_db_config()
+            env = os.environ.copy()
+            env["PGPASSWORD"] = db_config["password"]
+            env["PGCLIENTENCODING"] = "UTF8"
+            env["PGSSLMODE"] = self._resolve_sslmode(db_config["host"], db_config.get("sslmode", ""))
+            sslrootcert = str(db_config.get("sslrootcert", "") or "").strip()
+            if sslrootcert:
+                env["PGSSLROOTCERT"] = sslrootcert
+            common_args = [
+                psql_path,
+                "-h", str(db_config["host"]),
+                "-p", str(db_config["port"]),
+                "-U", str(db_config["user"]),
+                "-d", str(db_config["dbname"]),
+                "-v", "ON_ERROR_STOP=1",
+            ]
+
+            reset_result = subprocess.run(
+                common_args + [
+                    "-c",
+                    "DROP SCHEMA IF EXISTS public CASCADE; "
+                    "CREATE SCHEMA public; "
+                    "GRANT ALL ON SCHEMA public TO PUBLIC;"
+                ],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env=env,
+                timeout=180
+            )
+            if reset_result.returncode != 0:
+                error_text = (reset_result.stderr or reset_result.stdout or "\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u0441\u0431\u0440\u043e\u0441\u0438\u0442\u044c \u0441\u0445\u0435\u043c\u0443").strip()
+                return {
+                    "ok": False,
+                    "message": f"\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u0441\u0431\u0440\u043e\u0441\u0438\u0442\u044c \u0442\u0435\u043a\u0443\u0449\u0443\u044e \u0431\u0430\u0437\u0443: {error_text}",
+                    "path": str(source_path)
+                }
+
+            import_result = subprocess.run(
+                common_args + ["-f", str(import_path)],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env=env,
+                timeout=600
+            )
+            if import_result.returncode != 0:
+                error_text = (import_result.stderr or import_result.stdout or "\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u0438\u043c\u043f\u043e\u0440\u0442\u0438\u0440\u043e\u0432\u0430\u0442\u044c \u0434\u0430\u043c\u043f").strip()
+                return {
+                    "ok": False,
+                    "message": f"\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u0438\u043c\u043f\u043e\u0440\u0442\u0438\u0440\u043e\u0432\u0430\u0442\u044c \u0434\u0430\u043c\u043f: {error_text}",
+                    "path": str(source_path)
+                }
+
+            init_db()
+            self._ensure_indirect_schema()
+            self._ensure_operations_log_schema()
+            self._ensure_plate_cutting_schema()
+            return {
+                "ok": True,
+                "message": normalized_dump_path
+                    and "\u0414\u0430\u043c\u043f \u0437\u0430\u0433\u0440\u0443\u0436\u0435\u043d. \u0421\u043b\u0443\u0436\u0435\u0431\u043d\u044b\u0435 \u043a\u043e\u043c\u0430\u043d\u0434\u044b \\restrict/\\unrestrict \u0431\u044b\u043b\u0438 \u0430\u0432\u0442\u043e\u043c\u0430\u0442\u0438\u0447\u0435\u0441\u043a\u0438 \u0443\u0434\u0430\u043b\u0435\u043d\u044b \u0434\u043b\u044f \u0441\u043e\u0432\u043c\u0435\u0441\u0442\u0438\u043c\u043e\u0441\u0442\u0438. \u0415\u0441\u043b\u0438 \u043d\u0430 \u044d\u043a\u0440\u0430\u043d\u0430\u0445 \u0435\u0449\u0451 \u0432\u0438\u0434\u043d\u044b \u0441\u0442\u0430\u0440\u044b\u0435 \u0434\u0430\u043d\u043d\u044b\u0435, \u043f\u0435\u0440\u0435\u043f\u043e\u0434\u043a\u043b\u044e\u0447\u0438\u0442\u0435\u0441\u044c \u0438\u043b\u0438 \u043f\u0435\u0440\u0435\u0437\u0430\u043f\u0443\u0441\u0442\u0438\u0442\u0435 \u043f\u0440\u0438\u043b\u043e\u0436\u0435\u043d\u0438\u0435."
+                    or "\u0414\u0430\u043c\u043f \u0431\u0430\u0437\u044b \u0443\u0441\u043f\u0435\u0448\u043d\u043e \u0437\u0430\u0433\u0440\u0443\u0436\u0435\u043d. \u0415\u0441\u043b\u0438 \u043d\u0430 \u043d\u0435\u043a\u043e\u0442\u043e\u0440\u044b\u0445 \u044d\u043a\u0440\u0430\u043d\u0430\u0445 \u0435\u0449\u0451 \u0432\u0438\u0434\u043d\u044b \u0441\u0442\u0430\u0440\u044b\u0435 \u0434\u0430\u043d\u043d\u044b\u0435, \u043f\u0435\u0440\u0435\u043f\u043e\u0434\u043a\u043b\u044e\u0447\u0438\u0442\u0435\u0441\u044c \u0438\u043b\u0438 \u043f\u0435\u0440\u0435\u0437\u0430\u043f\u0443\u0441\u0442\u0438\u0442\u0435 \u043f\u0440\u0438\u043b\u043e\u0436\u0435\u043d\u0438\u0435.",
+                "path": str(source_path)
+            }
+        except Exception as e:
+            print(f"\u041e\u0448\u0438\u0431\u043a\u0430 \u0438\u043c\u043f\u043e\u0440\u0442\u0430 \u0434\u0430\u043c\u043f\u0430: {e}")
+            return {
+                "ok": False,
+                "message": f"\u041e\u0448\u0438\u0431\u043a\u0430 \u0438\u043c\u043f\u043e\u0440\u0442\u0430 \u0434\u0430\u043c\u043f\u0430: {e}",
+                "path": dump_path or ""
+            }
+
+    @Slot(result="QVariantMap")
+    def clearAllDatabaseData(self):
+        try:
+            from backend.db.schema import init_db
+
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT table_name
+                        FROM information_schema.tables
+                        WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
+                        ORDER BY table_name
+                    """)
+                    tables = [row[0] for row in cur.fetchall() if row and row[0]]
+                    if tables:
+                        cur.execute(
+                            sql.SQL("TRUNCATE TABLE {} RESTART IDENTITY CASCADE").format(
+                                sql.SQL(", ").join(sql.Identifier(table_name) for table_name in tables)
+                            )
+                        )
+                conn.commit()
+
+            init_db()
+            self._ensure_indirect_schema()
+            self._ensure_operations_log_schema()
+            self._ensure_plate_cutting_schema()
+            return {
+                "ok": True,
+                "message": "\u0412\u0441\u0435 \u0437\u0430\u043f\u0438\u0441\u0438 \u0432 \u0431\u0430\u0437\u0435 \u0443\u0434\u0430\u043b\u0435\u043d\u044b. \u0421\u0442\u0440\u0443\u043a\u0442\u0443\u0440\u0430 \u0442\u0430\u0431\u043b\u0438\u0446 \u0441\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0430.",
+                "path": ""
+            }
+        except Exception as e:
+            print(f"\u041e\u0448\u0438\u0431\u043a\u0430 \u043e\u0447\u0438\u0441\u0442\u043a\u0438 \u0431\u0430\u0437\u044b: {e}")
+            return {
+                "ok": False,
+                "message": f"\u041e\u0448\u0438\u0431\u043a\u0430 \u043e\u0447\u0438\u0441\u0442\u043a\u0438 \u0431\u0430\u0437\u044b: {e}",
                 "path": ""
             }
 

@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Dialogs
 import QtQuick.Layouts
 
 ApplicationWindow {
@@ -13,6 +14,7 @@ ApplicationWindow {
     property string connectionMessage: ""
     property string settingsActionMessage: ""
     property string settingsActionPath: ""
+    property string selectedDumpPath: ""
     property var backendObj: (typeof backend !== "undefined") ? backend : null
     property var updateManagerObj: (typeof updateManager !== "undefined") ? updateManager : null
     property string userManualText: "User Manual\n\n"
@@ -130,6 +132,22 @@ ApplicationWindow {
                 settingsResultDialog.open()
             }
         }
+        MenuItem {
+            text: "\u0417\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u044c \u0434\u0430\u043c\u043f \u0431\u0430\u0437\u044b"
+            onTriggered: {
+                root.selectedDumpPath = ""
+                importDumpFileDialog.open()
+            }
+        }
+
+        MenuItem {
+            text: "\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u0432\u0441\u0435 \u0434\u0430\u043d\u043d\u044b\u0435 \u0431\u0430\u0437\u044b"
+            onTriggered: {
+                clearDataPhraseField.text = ""
+                clearDataWarningDialog.open()
+            }
+        }
+
         MenuSeparator { }
 
         MenuItem {
@@ -439,6 +457,235 @@ ApplicationWindow {
         }
     }
 
+    FileDialog {
+        id: importDumpFileDialog
+        title: "\u0412\u044b\u0431\u043e\u0440 SQL-\u0434\u0430\u043c\u043f\u0430"
+        fileMode: FileDialog.OpenFile
+        nameFilters: ["SQL dump (*.sql)", "All files (*)"]
+        onAccepted: {
+            root.selectedDumpPath = root.normalizeFilePath(selectedFile)
+            importDumpPhraseField.text = ""
+            importDumpWarningDialog.open()
+        }
+    }
+
+    Dialog {
+        id: importDumpWarningDialog
+        title: "\u0418\u043c\u043f\u043e\u0440\u0442 \u0434\u0430\u043c\u043f\u0430 \u0431\u0430\u0437\u044b"
+        modal: true
+        width: 560
+
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 10
+
+            Label {
+                text: "\u0412\u044b\u0431\u0440\u0430\u043d\u043d\u044b\u0439 \u0434\u0430\u043c\u043f \u043f\u043e\u043b\u043d\u043e\u0441\u0442\u044c\u044e \u0437\u0430\u043c\u0435\u043d\u0438\u0442 \u0442\u0435\u043a\u0443\u0449\u0435\u0435 \u0441\u043e\u0434\u0435\u0440\u0436\u0438\u043c\u043e\u0435 \u0431\u0430\u0437\u044b."
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+
+            Label {
+                text: "\u0420\u0435\u043a\u043e\u043c\u0435\u043d\u0434\u0443\u0435\u0442\u0441\u044f: \u0441\u043d\u0430\u0447\u0430\u043b\u0430 \u0441\u0434\u0435\u043b\u0430\u0442\u044c \u0434\u0430\u043c\u043f \u0442\u0435\u043a\u0443\u0449\u0435\u0439 \u0431\u0430\u0437\u044b, \u0430 \u0437\u0430\u0442\u0435\u043c \u043f\u0440\u043e\u0434\u043e\u043b\u0436\u0438\u0442\u044c \u0438\u043c\u043f\u043e\u0440\u0442."
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+                color: "#8a5a00"
+            }
+
+            Label {
+                text: root.selectedDumpPath.length > 0 ? ("\u0424\u0430\u0439\u043b: " + root.selectedDumpPath) : ""
+                visible: root.selectedDumpPath.length > 0
+                color: "#555"
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                Item { Layout.fillWidth: true }
+                Button {
+                    text: "\u041e\u0442\u043c\u0435\u043d\u0430"
+                    onClicked: importDumpWarningDialog.close()
+                }
+                Button {
+                    text: "\u041f\u0440\u043e\u0434\u043e\u043b\u0436\u0438\u0442\u044c"
+                    highlighted: true
+                    onClicked: {
+                        importDumpWarningDialog.close()
+                        importDumpPhraseDialog.open()
+                    }
+                }
+            }
+        }
+    }
+
+    Dialog {
+        id: importDumpPhraseDialog
+        title: "\u0418\u0442\u043e\u0433\u043e\u0432\u043e\u0435 \u043f\u043e\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0435\u043d\u0438\u0435"
+        modal: true
+        width: 560
+
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 10
+
+            Label {
+                text: "\u0412\u0432\u0435\u0434\u0438\u0442\u0435 IMPORT, \u0447\u0442\u043e\u0431\u044b \u043f\u043e\u0434\u0442\u0432\u0435\u0440\u0434\u0438\u0442\u044c \u0437\u0430\u0433\u0440\u0443\u0437\u043a\u0443 \u0434\u0430\u043c\u043f\u0430 \u0438 \u0437\u0430\u043c\u0435\u043d\u0443 \u0442\u0435\u043a\u0443\u0449\u0438\u0445 \u0434\u0430\u043d\u043d\u044b\u0445."
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+
+            TextField {
+                id: importDumpPhraseField
+                Layout.fillWidth: true
+                placeholderText: "IMPORT"
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                Item { Layout.fillWidth: true }
+                Button {
+                    text: "\u041d\u0430\u0437\u0430\u0434"
+                    onClicked: importDumpPhraseDialog.close()
+                }
+                Button {
+                    text: "\u0417\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u044c \u0434\u0430\u043c\u043f"
+                    highlighted: true
+                    enabled: importDumpPhraseField.text.trim() === "IMPORT" && root.selectedDumpPath.length > 0
+                    onClicked: {
+                        importDumpPhraseDialog.close()
+                        var result = backendObj ? backendObj.importDatabaseDump(root.selectedDumpPath) : {"message": "\u0411\u044d\u043a\u0435\u043d\u0434 \u043d\u0435\u0434\u043e\u0441\u0442\u0443\u043f\u0435\u043d", "path": ""}
+                        root.settingsActionMessage = result.message || ""
+                        root.settingsActionPath = result.path || ""
+                        settingsResultDialog.open()
+                    }
+                }
+            }
+        }
+    }
+
+    Dialog {
+        id: clearDataWarningDialog
+        title: "\u0423\u0434\u0430\u043b\u0435\u043d\u0438\u0435 \u0432\u0441\u0435\u0445 \u0434\u0430\u043d\u043d\u044b\u0445"
+        modal: true
+        width: 560
+
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 10
+
+            Label {
+                text: "\u042d\u0442\u043e \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u0435 \u0443\u0434\u0430\u043b\u0438\u0442 \u0432\u0441\u0435 \u0437\u0430\u043f\u0438\u0441\u0438 \u0438\u0437 \u0431\u0430\u0437\u044b, \u043d\u043e \u0441\u043e\u0445\u0440\u0430\u043d\u0438\u0442 \u0441\u0442\u0440\u0443\u043a\u0442\u0443\u0440\u0443 \u0442\u0430\u0431\u043b\u0438\u0446."
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+
+            Label {
+                text: "\u0418\u0441\u043f\u043e\u043b\u044c\u0437\u0443\u0439\u0442\u0435 \u044d\u0442\u043e \u0442\u043e\u043b\u044c\u043a\u043e \u0435\u0441\u043b\u0438 \u0442\u043e\u0447\u043d\u043e \u0443\u0432\u0435\u0440\u0435\u043d\u044b, \u0447\u0442\u043e \u0442\u0435\u043a\u0443\u0449\u0438\u0435 \u0434\u0430\u043d\u043d\u044b\u0435 \u0431\u043e\u043b\u044c\u0448\u0435 \u043d\u0435 \u043d\u0443\u0436\u043d\u044b."
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+                color: "#8a5a00"
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                Item { Layout.fillWidth: true }
+                Button {
+                    text: "\u041e\u0442\u043c\u0435\u043d\u0430"
+                    onClicked: clearDataWarningDialog.close()
+                }
+                Button {
+                    text: "\u041f\u0440\u043e\u0434\u043e\u043b\u0436\u0438\u0442\u044c"
+                    highlighted: true
+                    onClicked: {
+                        clearDataWarningDialog.close()
+                        clearDataPhraseDialog.open()
+                    }
+                }
+            }
+        }
+    }
+
+    Dialog {
+        id: clearDataPhraseDialog
+        title: "\u0412\u0442\u043e\u0440\u043e\u0435 \u043f\u043e\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0435\u043d\u0438\u0435"
+        modal: true
+        width: 560
+
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 10
+
+            Label {
+                text: "\u0412\u0432\u0435\u0434\u0438\u0442\u0435 DELETE ALL, \u0447\u0442\u043e\u0431\u044b \u0440\u0430\u0437\u0431\u043b\u043e\u043a\u0438\u0440\u043e\u0432\u0430\u0442\u044c \u0444\u0438\u043d\u0430\u043b\u044c\u043d\u0443\u044e \u043a\u043d\u043e\u043f\u043a\u0443 \u0443\u0434\u0430\u043b\u0435\u043d\u0438\u044f."
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+
+            TextField {
+                id: clearDataPhraseField
+                Layout.fillWidth: true
+                placeholderText: "DELETE ALL"
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                Item { Layout.fillWidth: true }
+                Button {
+                    text: "\u041d\u0430\u0437\u0430\u0434"
+                    onClicked: clearDataPhraseDialog.close()
+                }
+                Button {
+                    text: "\u041f\u0440\u043e\u0434\u043e\u043b\u0436\u0438\u0442\u044c"
+                    highlighted: true
+                    enabled: clearDataPhraseField.text.trim() === "DELETE ALL"
+                    onClicked: {
+                        clearDataPhraseDialog.close()
+                        clearDataFinalDialog.open()
+                    }
+                }
+            }
+        }
+    }
+
+    Dialog {
+        id: clearDataFinalDialog
+        title: "\u041f\u043e\u0441\u043b\u0435\u0434\u043d\u0435\u0435 \u043f\u043e\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0435\u043d\u0438\u0435"
+        modal: true
+        width: 560
+
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 10
+
+            Label {
+                text: "\u041d\u0430\u0436\u043c\u0438\u0442\u0435 \u0444\u0438\u043d\u0430\u043b\u044c\u043d\u0443\u044e \u043a\u043d\u043e\u043f\u043a\u0443 \u0442\u043e\u043b\u044c\u043a\u043e \u0435\u0441\u043b\u0438 \u0432\u044b \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u0442\u0435\u043b\u044c\u043d\u043e \u0445\u043e\u0442\u0438\u0442\u0435 \u0441\u0442\u0435\u0440\u0435\u0442\u044c \u0432\u0441\u0435 \u0442\u0435\u043a\u0443\u0449\u0438\u0435 \u0437\u0430\u043f\u0438\u0441\u0438."
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                Item { Layout.fillWidth: true }
+                Button {
+                    text: "\u041e\u0442\u043c\u0435\u043d\u0430"
+                    onClicked: clearDataFinalDialog.close()
+                }
+                Button {
+                    text: "\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u0432\u0441\u0435 \u0434\u0430\u043d\u043d\u044b\u0435 \u0441\u0435\u0439\u0447\u0430\u0441"
+                    highlighted: true
+                    onClicked: {
+                        clearDataFinalDialog.close()
+                        var result = backendObj ? backendObj.clearAllDatabaseData() : {"message": "\u0411\u044d\u043a\u0435\u043d\u0434 \u043d\u0435\u0434\u043e\u0441\u0442\u0443\u043f\u0435\u043d", "path": ""}
+                        root.settingsActionMessage = result.message || ""
+                        root.settingsActionPath = ""
+                        settingsResultDialog.open()
+                    }
+                }
+            }
+        }
+    }
+
     Dialog {
         id: settingsResultDialog
         title: "Результат"
@@ -472,6 +719,13 @@ ApplicationWindow {
                 }
             }
         }
+    }
+
+    function normalizeFilePath(urlValue) {
+        var value = urlValue ? urlValue.toString() : ""
+        if (value.indexOf("file:///") === 0)
+            value = decodeURIComponent(value.substring(8))
+        return value
     }
 
     function loadDatabaseConfig() {

@@ -715,7 +715,7 @@ Page {
                                 visible: compositeTab.selectedRecipeId > 0
                                 model: compositeRecipeItemsModel
                                 delegate: Rectangle {
-                                    width: parent.width
+                                    width: ListView.view ? ListView.view.width : 0
                                     height: 38
                                     border.color: "#ddd"
                                     color: enough ? "#dff2df" : "#ffd9d9"
@@ -820,7 +820,7 @@ Page {
                             clip: true
                             model: compositeRecipeDraftModel
                             delegate: Rectangle {
-                                width: parent.width
+                                width: ListView.view ? ListView.view.width : 0
                                 height: 36
                                 border.color: "#ddd"
                                 color: index % 2 ? "#f9f9f9" : "white"

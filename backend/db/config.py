@@ -4,6 +4,13 @@ import sys
 from pathlib import Path
 
 
+def _default_sslmode_for_host(host):
+    value = str(host or "").strip().lower()
+    if value in ("", "localhost", "127.0.0.1", "::1"):
+        return "disable"
+    return "require"
+
+
 def get_config_path():
     """Returns the editable config.ini path for both source and packaged runs."""
     cwd_config = Path.cwd() / 'config.ini'
@@ -22,7 +29,9 @@ def create_default_config(path=None):
         'port': '5432',
         'name': 'cost',
         'user': 'postgres',
-        'password': ''
+        'password': '',
+        'sslmode': 'disable',
+        'sslrootcert': ''
     }
     config['app'] = {'connection_confirmed': 'false'}
     with open(config_path, 'w', encoding='utf-8') as file:
@@ -57,11 +66,16 @@ def save_db_config(host, port, name, user, password, confirmed=True):
     config = get_config(create_if_missing=True)
     if 'database' not in config:
         config['database'] = {}
-    config['database']['host'] = str(host or 'localhost').strip()
+    normalized_host = str(host or 'localhost').strip()
+    config['database']['host'] = normalized_host
     config['database']['port'] = str(port or '5432').strip()
     config['database']['name'] = str(name or 'cost').strip()
     config['database']['user'] = str(user or 'postgres').strip()
     config['database']['password'] = str(password or '')
+    existing_sslmode = str(config['database'].get('sslmode', '') or '').strip()
+    if not existing_sslmode:
+        config['database']['sslmode'] = _default_sslmode_for_host(normalized_host)
+    config['database']['sslrootcert'] = str(config['database'].get('sslrootcert', '') or '').strip()
     if 'app' not in config:
         config['app'] = {}
     config['app']['connection_confirmed'] = 'true' if confirmed else 'false'
@@ -87,7 +101,9 @@ def get_db_config():
         'port': int(db_config['port']),
         'dbname': db_config['name'],
         'user': db_config['user'],
-        'password': db_config['password']
+        'password': db_config['password'],
+        'sslmode': str(db_config.get('sslmode', '') or _default_sslmode_for_host(db_config['host'])).strip(),
+        'sslrootcert': str(db_config.get('sslrootcert', '') or '').strip()
     }
 
 

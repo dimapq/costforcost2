@@ -5,15 +5,21 @@ def get_connection():
     """Создаёт подключение к БД используя параметры из config.ini"""
     try:
         db_config = get_db_config()
-        
-        # Формируем DATABASE_URL
-        DATABASE_URL = (
-            f"postgresql://{db_config['user']}:{db_config['password']}@"
-            f"{db_config['host']}:{db_config['port']}/{db_config['dbname']}"
-            f"?client_encoding=utf8"
-        )
-        
-        return psycopg2.connect(DATABASE_URL)
+        connect_kwargs = {
+            "host": db_config["host"],
+            "port": db_config["port"],
+            "dbname": db_config["dbname"],
+            "user": db_config["user"],
+            "password": db_config["password"],
+            "client_encoding": "utf8",
+        }
+        sslmode = str(db_config.get("sslmode", "") or "").strip()
+        if sslmode:
+            connect_kwargs["sslmode"] = sslmode
+        sslrootcert = str(db_config.get("sslrootcert", "") or "").strip()
+        if sslrootcert:
+            connect_kwargs["sslrootcert"] = sslrootcert
+        return psycopg2.connect(**connect_kwargs)
         
     except FileNotFoundError as e:
         print("\n" + "="*70)
