@@ -11,10 +11,21 @@ ApplicationWindow {
     title: appTitle
 
     property bool connectionReady: false
+    property bool startupModeChosen: false
     property string connectionMessage: ""
     property string settingsActionMessage: ""
     property string settingsActionPath: ""
     property string selectedDumpPath: ""
+    property string selectedConnectionMode: ""
+    property string connectionDialogTitleText: "\u041f\u043e\u0434\u043a\u043b\u044e\u0447\u0435\u043d\u0438\u0435 \u043a \u0431\u0430\u0437\u0435 \u0434\u0430\u043d\u043d\u044b\u0445"
+    property string connectionDialogHintText: "\u041f\u0440\u043e\u0432\u0435\u0440\u044c\u0442\u0435 \u043f\u0430\u0440\u0430\u043c\u0435\u0442\u0440\u044b \u0438 \u043d\u0430\u0436\u043c\u0438\u0442\u0435 \u00ab\u0421\u043e\u0445\u0440\u0430\u043d\u0438\u0442\u044c \u0438 \u043f\u043e\u0434\u043a\u043b\u044e\u0447\u0438\u0442\u044c\u0441\u044f\u00bb."
+    property string onlineConfigPreview: ""
+    property string onlineConfigExportPath: ""
+    property string onlineHostValue: ""
+    property string onlinePortValue: ""
+    property string onlineDbNameValue: ""
+    property string onlineUserValue: ""
+    property string onlinePasswordMaskedValue: ""
     property var backendObj: (typeof backend !== "undefined") ? backend : null
     property var updateManagerObj: (typeof updateManager !== "undefined") ? updateManager : null
     property string userManualText: "User Manual\n\n"
@@ -98,9 +109,21 @@ ApplicationWindow {
         MenuItem {
             text: "Настройка подключения"
             onTriggered: {
-                loadDatabaseConfig()
+                if (!root.selectedConnectionMode)
+                    root.selectedConnectionMode = "local"
+                loadDatabaseConfig(root.selectedConnectionMode)
                 root.connectionMessage = ""
                 connectionDialog.open()
+            }
+        }
+
+        MenuSeparator { }
+
+        MenuItem {
+            text: "\u041f\u043e\u043a\u0430\u0437\u0430\u0442\u044c \u043f\u0430\u0440\u0430\u043c\u0435\u0442\u0440\u044b \u043e\u043d\u043b\u0430\u0439\u043d-\u043f\u043e\u0434\u043a\u043b\u044e\u0447\u0435\u043d\u0438\u044f"
+            onTriggered: {
+                root.refreshOnlineConnectionInfo()
+                onlineConnectionDialog.open()
             }
         }
 
@@ -188,24 +211,56 @@ ApplicationWindow {
             spacing: 12
 
             Label {
-                text: "Настройка подключения к базе данных"
+                text: !root.startupModeChosen
+                      ? "Выбор режима подключения"
+                      : "Настройка подключения к базе данных"
                 font.pixelSize: 24
                 font.bold: true
                 Layout.alignment: Qt.AlignHCenter
             }
             Label {
-                text: "Проверьте параметры из config.ini и нажмите «Сохранить и подключиться»."
+                text: !root.startupModeChosen
+                      ? "Выберите, куда подключаться при входе: к онлайн-базе или к локальной базе. Локальный режим пока работает как заглушка через localhost."
+                      : root.connectionDialogHintText
                 color: "#555"
                 wrapMode: Text.WordWrap
                 Layout.fillWidth: true
                 horizontalAlignment: Text.AlignHCenter
+            }
+
+            RowLayout {
+                Layout.alignment: Qt.AlignHCenter
+                spacing: 12
+                visible: !root.startupModeChosen
+
+                Button {
+                    text: "Онлайн-база"
+                    highlighted: true
+                    onClicked: root.beginConnectionFlow("online")
+                }
+
+                Button {
+                    text: "Локальная база"
+                    onClicked: root.beginConnectionFlow("local")
+                }
+            }
+
+            Button {
+                text: "Назад к выбору"
+                Layout.alignment: Qt.AlignHCenter
+                visible: root.startupModeChosen && !root.connectionReady
+                onClicked: {
+                    root.startupModeChosen = false
+                    root.selectedConnectionMode = ""
+                    root.connectionMessage = ""
+                }
             }
         }
     }
 
     Dialog {
         id: connectionDialog
-        title: "Подключение к базе данных"
+        title: root.connectionDialogTitleText
         modal: true
         closePolicy: root.connectionReady ? Popup.CloseOnEscape | Popup.CloseOnPressOutside : Popup.NoAutoClose
         width: 560
@@ -220,6 +275,13 @@ ApplicationWindow {
                 id: configPathLabel
                 text: "config.ini"
                 color: "#666"
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+
+            Label {
+                text: root.connectionDialogHintText
+                color: "#555"
                 wrapMode: Text.WordWrap
                 Layout.fillWidth: true
             }
@@ -270,7 +332,7 @@ ApplicationWindow {
                     text: "Сохранить и подключиться"
                     highlighted: true
                     onClicked: {
-                        var result = backend.saveDatabaseConfig(dbHostField.text, dbPortField.text, dbNameField.text, dbUserField.text, dbPasswordField.text)
+                        var result = backendObj ? backendObj.saveDatabaseConfigForMode(root.selectedConnectionMode || "local", dbHostField.text, dbPortField.text, dbNameField.text, dbUserField.text, dbPasswordField.text) : {"ok": false, "message": "?????? ??????????"}
                         root.connectionMessage = result.message
                         if (result.ok) {
                             root.connectionReady = true
@@ -686,9 +748,164 @@ ApplicationWindow {
         }
     }
 
+
+    Dialog {
+        id: onlineConnectionDialog
+        title: "\u041f\u0430\u0440\u0430\u043c\u0435\u0442\u0440\u044b \u043e\u043d\u043b\u0430\u0439\u043d-\u043f\u043e\u0434\u043a\u043b\u044e\u0447\u0435\u043d\u0438\u044f"
+        modal: true
+        width: Math.min(root.width - 40, 760)
+        height: Math.min(root.height - 40, 640)
+
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 10
+
+            Label {
+                text: "\u0417\u0434\u0435\u0441\u044c \u0441\u043e\u0431\u0440\u0430\u043d\u044b \u043f\u0430\u0440\u0430\u043c\u0435\u0442\u0440\u044b \u0434\u043b\u044f \u043a\u043b\u0438\u0435\u043d\u0442\u0441\u043a\u043e\u0433\u043e \u043f\u0440\u0438\u043b\u043e\u0436\u0435\u043d\u0438\u044f: \u043c\u043e\u0436\u043d\u043e \u043f\u043e\u0441\u043c\u043e\u0442\u0440\u0435\u0442\u044c \u0434\u0430\u043d\u043d\u044b\u0435, \u0432\u044b\u0433\u0440\u0443\u0437\u0438\u0442\u044c \u043e\u0442\u0434\u0435\u043b\u044c\u043d\u044b\u0439 config.ini \u0438 \u0441\u043c\u0435\u043d\u0438\u0442\u044c \u043f\u0430\u0440\u043e\u043b\u044c."
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+
+            GridLayout {
+                columns: 2
+                Layout.fillWidth: true
+                columnSpacing: 10
+                rowSpacing: 8
+
+                Label { text: "Host:" }
+                TextField { readOnly: true; text: root.onlineHostValue; Layout.fillWidth: true }
+
+                Label { text: "Port:" }
+                TextField { readOnly: true; text: root.onlinePortValue; Layout.fillWidth: true }
+
+                Label { text: "Database:" }
+                TextField { readOnly: true; text: root.onlineDbNameValue; Layout.fillWidth: true }
+
+                Label { text: "User:" }
+                TextField { readOnly: true; text: root.onlineUserValue; Layout.fillWidth: true }
+
+                Label { text: "Password:" }
+                TextField { readOnly: true; text: root.onlinePasswordMaskedValue; Layout.fillWidth: true }
+            }
+
+            Label {
+                text: root.onlineConfigExportPath.length > 0 ? ("\u041f\u043e\u0441\u043b\u0435\u0434\u043d\u0438\u0439 client config.ini: " + root.onlineConfigExportPath) : ""
+                visible: root.onlineConfigExportPath.length > 0
+                color: "#555"
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+
+            ScrollView {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                clip: true
+
+                TextArea {
+                    readOnly: true
+                    wrapMode: TextEdit.NoWrap
+                    text: root.onlineConfigPreview
+                    textFormat: TextEdit.PlainText
+                    selectByMouse: true
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+
+                Button {
+                    text: "\u0412\u044b\u0433\u0440\u0443\u0437\u0438\u0442\u044c client config.ini"
+                    onClicked: {
+                        var result = backendObj ? backendObj.exportClientOnlineConfig() : {"ok": false, "message": "\u0411\u044d\u043a\u0435\u043d\u0434 \u043d\u0435\u0434\u043e\u0441\u0442\u0443\u043f\u0435\u043d", "path": ""}
+                        root.settingsActionMessage = result.message || ""
+                        root.settingsActionPath = result.path || ""
+                        if (result.ok) {
+                            root.onlineConfigExportPath = result.path || ""
+                            root.refreshOnlineConnectionInfo()
+                        }
+                        settingsResultDialog.open()
+                    }
+                }
+
+                Button {
+                    text: "\u0421\u043c\u0435\u043d\u0438\u0442\u044c \u043f\u0430\u0440\u043e\u043b\u044c"
+                    onClicked: {
+                        newOnlinePasswordField.text = ""
+                        confirmOnlinePasswordField.text = ""
+                        onlinePasswordChangeDialog.open()
+                    }
+                }
+
+                Item { Layout.fillWidth: true }
+
+                Button {
+                    text: "\u0417\u0430\u043a\u0440\u044b\u0442\u044c"
+                    onClicked: onlineConnectionDialog.close()
+                }
+            }
+        }
+    }
+
+    Dialog {
+        id: onlinePasswordChangeDialog
+        title: "\u0421\u043c\u0435\u043d\u0430 \u043f\u0430\u0440\u043e\u043b\u044f \u043e\u043d\u043b\u0430\u0439\u043d-\u043f\u043e\u0434\u043a\u043b\u044e\u0447\u0435\u043d\u0438\u044f"
+        modal: true
+        width: 520
+
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 10
+
+            Label {
+                text: "\u041f\u0430\u0440\u043e\u043b\u044c \u0431\u0443\u0434\u0435\u0442 \u0438\u0437\u043c\u0435\u043d\u0435\u043d \u0443 \u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u044f \u043e\u043d\u043b\u0430\u0439\u043d-\u0431\u0430\u0437\u044b \u0438 \u043e\u0434\u043d\u043e\u0432\u0440\u0435\u043c\u0435\u043d\u043d\u043e \u0437\u0430\u043f\u0438\u0441\u0430\u043d \u0432 \u043a\u043b\u0438\u0435\u043d\u0442\u0441\u043a\u0438\u0439 config.ini."
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+
+            Label { text: "\u041d\u043e\u0432\u044b\u0439 \u043f\u0430\u0440\u043e\u043b\u044c:" }
+            TextField {
+                id: newOnlinePasswordField
+                Layout.fillWidth: true
+                echoMode: TextInput.Password
+            }
+
+            Label { text: "\u041f\u043e\u0432\u0442\u043e\u0440 \u043f\u0430\u0440\u043e\u043b\u044f:" }
+            TextField {
+                id: confirmOnlinePasswordField
+                Layout.fillWidth: true
+                echoMode: TextInput.Password
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                Item { Layout.fillWidth: true }
+                Button {
+                    text: "\u041e\u0442\u043c\u0435\u043d\u0430"
+                    onClicked: onlinePasswordChangeDialog.close()
+                }
+                Button {
+                    text: "\u0421\u043c\u0435\u043d\u0438\u0442\u044c \u043f\u0430\u0440\u043e\u043b\u044c"
+                    highlighted: true
+                    enabled: newOnlinePasswordField.text.length >= 8 && newOnlinePasswordField.text === confirmOnlinePasswordField.text
+                    onClicked: {
+                        var result = backendObj ? backendObj.rotateOnlineDatabasePassword(newOnlinePasswordField.text) : {"ok": false, "message": "\u0411\u044d\u043a\u0435\u043d\u0434 \u043d\u0435\u0434\u043e\u0441\u0442\u0443\u043f\u0435\u043d", "path": ""}
+                        root.settingsActionMessage = result.message || ""
+                        root.settingsActionPath = result.path || ""
+                        if (result.ok) {
+                            root.onlineConfigExportPath = result.path || ""
+                            root.refreshOnlineConnectionInfo()
+                            onlinePasswordChangeDialog.close()
+                        }
+                        settingsResultDialog.open()
+                    }
+                }
+            }
+        }
+    }
+
     Dialog {
         id: settingsResultDialog
-        title: "Результат"
+        title: "\u0420\u0435\u0437\u0443\u043b\u044c\u0442\u0430\u0442"
         modal: true
         width: 560
 
@@ -703,7 +920,7 @@ ApplicationWindow {
             }
 
             Label {
-                text: root.settingsActionPath.length > 0 ? ("Р¤Р°Р№Р»: " + root.settingsActionPath) : ""
+                text: root.settingsActionPath.length > 0 ? ("\u0424\u0430\u0439\u043b: " + root.settingsActionPath) : ""
                 visible: root.settingsActionPath.length > 0
                 color: "#555"
                 wrapMode: Text.WordWrap
@@ -714,13 +931,12 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 Item { Layout.fillWidth: true }
                 Button {
-                    text: "Закрыть"
+                    text: "\u0417\u0430\u043a\u0440\u044b\u0442\u044c"
                     onClicked: settingsResultDialog.close()
                 }
             }
         }
     }
-
     function normalizeFilePath(urlValue) {
         var value = urlValue ? urlValue.toString() : ""
         if (value.indexOf("file:///") === 0)
@@ -728,29 +944,93 @@ ApplicationWindow {
         return value
     }
 
-    function loadDatabaseConfig() {
-        var cfg = backendObj ? backendObj.getDatabaseConfig() : {}
-        dbHostField.text = cfg.host || "localhost"
-        dbPortField.text = cfg.port || "5432"
-        dbNameField.text = cfg.name || "cost"
-        dbUserField.text = cfg.user || "postgres"
-        dbPasswordField.text = cfg.password || ""
+    function isLocalModeHost(hostValue) {
+        var value = (hostValue || "").toString().toLowerCase()
+        return value === "" || value === "localhost" || value === "127.0.0.1" || value === "::1"
+    }
+
+    function updateConnectionModeTexts(mode) {
+        if (mode === "online") {
+            root.connectionDialogTitleText = "Подключение к онлайн-базе"
+            root.connectionDialogHintText = "Введите параметры онлайн-базы и выполните вход. Пока используется тот же экран подключения, что и для локальной базы."
+        } else {
+            root.connectionDialogTitleText = "Подключение к локальной базе"
+            root.connectionDialogHintText = "Локальная база пока работает как заглушка по старой схеме. Проверьте localhost-параметры и нажмите «Сохранить и подключиться»."
+        }
+    }
+
+    function loadDatabaseConfig(mode) {
+        var useMode = mode || root.selectedConnectionMode || "local"
+        var cfg = backendObj ? backendObj.getDatabaseConfigForMode(useMode) : {}
+        updateConnectionModeTexts(useMode)
+        if (useMode === "local" && !isLocalModeHost(cfg.host || "")) {
+            dbHostField.text = "localhost"
+            dbPortField.text = "5432"
+            dbNameField.text = "cost"
+            dbUserField.text = "postgres"
+            dbPasswordField.text = ""
+        } else {
+            dbHostField.text = cfg.host || "localhost"
+            dbPortField.text = cfg.port || "5432"
+            dbNameField.text = cfg.name || "cost"
+            dbUserField.text = cfg.user || "postgres"
+            dbPasswordField.text = cfg.password || ""
+        }
         configPathLabel.text = "Файл настроек: " + (cfg.config_path || "config.ini")
     }
 
-    Component.onCompleted: {
-        loadDatabaseConfig()
-        var cfg = backendObj ? backendObj.getDatabaseConfig() : {}
-        if (backendObj && cfg.connection_confirmed && backendObj.testDatabaseConfig(cfg.host, cfg.port, cfg.name, cfg.user, cfg.password).ok) {
-            root.connectionReady = true
-        } else {
-            root.connectionReady = false
-            root.connectionMessage = cfg.connection_confirmed ? "Не удалось подключиться. Проверьте параметры." : "Первое подключение: проверьте данные из config.ini."
-            connectionDialog.open()
+
+    function refreshOnlineConnectionInfo() {
+        var info = backendObj ? backendObj.getOnlineConnectionInfo() : {"ok": false, "message": "\u0411\u044d\u043a\u0435\u043d\u0434 \u043d\u0435\u0434\u043e\u0441\u0442\u0443\u043f\u0435\u043d"}
+        if (!info.ok) {
+            root.settingsActionMessage = info.message || "\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u043f\u043e\u043b\u0443\u0447\u0438\u0442\u044c \u043f\u0430\u0440\u0430\u043c\u0435\u0442\u0440\u044b \u043e\u043d\u043b\u0430\u0439\u043d-\u043f\u043e\u0434\u043a\u043b\u044e\u0447\u0435\u043d\u0438\u044f."
+            root.settingsActionPath = ""
+            settingsResultDialog.open()
+            return
         }
+        root.onlineHostValue = info.host || ""
+        root.onlinePortValue = info.port || ""
+        root.onlineDbNameValue = info.name || ""
+        root.onlineUserValue = info.user || ""
+        root.onlinePasswordMaskedValue = info.masked_password || ""
+        root.onlineConfigPreview = info.config_text || ""
+    }
+    function beginConnectionFlow(mode) {
+        var useMode = mode || "local"
+        root.selectedConnectionMode = useMode
+        root.startupModeChosen = true
+        root.connectionReady = false
+        root.connectionMessage = ""
+        loadDatabaseConfig(useMode)
+        var cfg = backendObj ? backendObj.activateDatabaseMode(useMode) : {}
+        var configMatchesMode = useMode === "local"
+                                ? isLocalModeHost(cfg.host || "")
+                                : !isLocalModeHost(cfg.host || "")
+        if (backendObj && cfg.connection_confirmed && configMatchesMode && backendObj.testDatabaseConfig(cfg.host, cfg.port, cfg.name, cfg.user, cfg.password).ok) {
+            root.connectionReady = true
+            return
+        }
+        if (cfg.connection_confirmed && configMatchesMode)
+            root.connectionMessage = "Не удалось подключиться. Проверьте параметры."
+        else if (useMode === "online")
+            root.connectionMessage = "Выполните вход в онлайн-базу."
+        else
+            root.connectionMessage = "Локальная база пока подключается по старой схеме через localhost."
+        connectionDialog.open()
+    }
+
+    Component.onCompleted: {
+        var startupMode = backendObj ? backendObj.getSelectedConnectionMode() : "local"
+        updateConnectionModeTexts(startupMode)
+        loadDatabaseConfig(startupMode)
+        root.connectionReady = false
+        root.startupModeChosen = false
+        root.selectedConnectionMode = startupMode
+        root.connectionMessage = ""
         if (updateManagerObj && updateManagerObj.enabled)
             updateManagerObj.checkForUpdates(false)
     }
+
 }
 
 

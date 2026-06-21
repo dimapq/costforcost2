@@ -93,17 +93,17 @@ class UpdateManager(QObject):
     def checkForUpdates(self, user_initiated=False):
         if not self._enabled:
             if user_initiated:
-                self._set_status("?????????????? ???????? ?????? ? ????????? ?????? ??????????.")
+                self._set_status("\u0410\u0432\u0442\u043e\u043c\u0430\u0442\u0438\u0447\u0435\u0441\u043a\u043e\u0435 \u043e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u0438\u0435 \u0432\u044b\u043a\u043b\u044e\u0447\u0435\u043d\u043e \u0432 \u0442\u0435\u043a\u0443\u0449\u0435\u0439 \u0441\u0431\u043e\u0440\u043a\u0435 \u043f\u0440\u0438\u043b\u043e\u0436\u0435\u043d\u0438\u044f.")
             return
         self._start_background(self._check_worker, bool(user_initiated))
 
     @Slot()
     def downloadAndInstallUpdate(self):
         if not self._enabled:
-            self._set_status("?????????????? ???????? ?????? ? ????????? ?????? ??????????.")
+            self._set_status("\u0410\u0432\u0442\u043e\u043c\u0430\u0442\u0438\u0447\u0435\u0441\u043a\u043e\u0435 \u043e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u0438\u0435 \u0432\u044b\u043a\u043b\u044e\u0447\u0435\u043d\u043e \u0432 \u0442\u0435\u043a\u0443\u0449\u0435\u0439 \u0441\u0431\u043e\u0440\u043a\u0435 \u043f\u0440\u0438\u043b\u043e\u0436\u0435\u043d\u0438\u044f.")
             return
         if not self._download_url:
-            self._set_status("??????? ????? ????? ????????? ??????????.")
+            self._set_status("\u0421\u043d\u0430\u0447\u0430\u043b\u0430 \u043d\u0443\u0436\u043d\u043e \u043d\u0430\u0439\u0442\u0438 \u0434\u043e\u0441\u0442\u0443\u043f\u043d\u043e\u0435 \u043e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u0438\u0435.")
             return
         self._start_background(self._download_worker)
 
@@ -122,12 +122,12 @@ class UpdateManager(QObject):
     def _check_worker(self, user_initiated: bool):
         self._set_busy(True)
         self._set_progress(-1.0)
-        self._set_status("???????? ??????????...")
+        self._set_status("\u041f\u043e\u0438\u0441\u043a \u043e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u0438\u0439...")
         try:
             metadata = self._fetch_release_metadata()
             latest_version = (metadata.get("version") or "").strip()
             if not latest_version:
-                raise RuntimeError("? ????????? ?????????? ?? ??????? ??????.")
+                raise RuntimeError("\u0412 \u043e\u0442\u0432\u0435\u0442\u0435 \u043e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u0438\u044f \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d \u043d\u043e\u043c\u0435\u0440 \u0432\u0435\u0440\u0441\u0438\u0438.")
 
             self._set_latest_version(latest_version)
             self._set_release_notes((metadata.get("notes") or "").strip())
@@ -136,7 +136,7 @@ class UpdateManager(QObject):
 
             if self._is_newer_version(latest_version, APP_VERSION):
                 self._set_update_available(True)
-                self._set_status(f"??????? ?????????? {latest_version}. ??????? ????????...")
+                self._set_status(f"\u041d\u0430\u0439\u0434\u0435\u043d\u043e \u043e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u0438\u0435 {latest_version}. \u041d\u0430\u0447\u0438\u043d\u0430\u044e \u0437\u0430\u0433\u0440\u0443\u0437\u043a\u0443...")
                 self._download_worker(already_locked=True)
                 return
 
@@ -144,10 +144,10 @@ class UpdateManager(QObject):
             self._set_release_notes("")
             self._download_url = ""
             self._sha256 = ""
-            self._set_status("?????????? ?? ???????." if user_initiated else "")
+            self._set_status("\u041e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u0438\u0439 \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d\u043e." if user_initiated else "")
         except Exception as e:
             self._set_update_available(False)
-            self._set_status(f"?????? ???????? ??????????: {e}")
+            self._set_status(f"\u041e\u0448\u0438\u0431\u043a\u0430 \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0438 \u043e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u0438\u0439: {e}")
         finally:
             self._set_busy(False)
             if self._progress < 0:
@@ -159,15 +159,15 @@ class UpdateManager(QObject):
         try:
             download_url = self._download_url
             if not download_url:
-                raise RuntimeError("?? ??????? ?????? ?? ????? ??????????.")
+                raise RuntimeError("\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u043f\u043e\u043b\u0443\u0447\u0438\u0442\u044c URL \u043f\u0430\u043a\u0435\u0442\u0430 \u043e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u0438\u044f.")
             if not self._updater_path.exists():
-                raise RuntimeError(f"?? ?????? ???? ??????????: {self._updater_path.name}")
+                raise RuntimeError(f"\u041d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d \u0444\u0430\u0439\u043b \u043e\u0431\u043d\u043e\u0432\u043b\u044f\u0442\u043e\u0440\u0430: {self._updater_path.name}")
 
             temp_dir = Path(tempfile.gettempdir()) / "MachineCostPro" / "updates"
             temp_dir.mkdir(parents=True, exist_ok=True)
             zip_path = temp_dir / STABLE_ZIP_ASSET_NAME
 
-            self._set_status("???????? ??????????...")
+            self._set_status("\u0417\u0430\u0433\u0440\u0443\u0437\u043a\u0430 \u043e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u0438\u044f...")
             self._set_progress(0.0)
             with requests.get(download_url, stream=True, timeout=60) as response:
                 response.raise_for_status()
@@ -185,10 +185,10 @@ class UpdateManager(QObject):
             if self._sha256:
                 file_hash = hashlib.sha256(zip_path.read_bytes()).hexdigest().lower()
                 if file_hash != self._sha256:
-                    raise RuntimeError("??????????? ????? ?????????? ?? ???????.")
+                    raise RuntimeError("\u041a\u043e\u043d\u0442\u0440\u043e\u043b\u044c\u043d\u0430\u044f \u0441\u0443\u043c\u043c\u0430 \u043e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u0438\u044f \u043d\u0435 \u0441\u043e\u0432\u043f\u0430\u043b\u0430.")
 
             self._set_progress(100.0)
-            self._set_status("?????????? ??????????...")
+            self._set_status("\u0417\u0430\u043f\u0443\u0441\u043a \u043e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u0438\u044f...")
             app_exe_name = Path(sys.executable).name if getattr(sys, "frozen", False) else APP_EXE_NAME
             subprocess.Popen([
                 str(self._updater_path),
@@ -201,10 +201,10 @@ class UpdateManager(QObject):
                 "--pid",
                 str(os.getpid()),
             ])
-            self._set_status("?????????? ?????????. ?????????? ????? ????????????.")
+            self._set_status("\u041e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u0438\u0435 \u0437\u0430\u043f\u0443\u0449\u0435\u043d\u043e. \u041f\u0440\u0438\u043b\u043e\u0436\u0435\u043d\u0438\u0435 \u0441\u0435\u0439\u0447\u0430\u0441 \u0437\u0430\u043a\u0440\u043e\u0435\u0442\u0441\u044f.")
             QMetaObject.invokeMethod(QCoreApplication.instance(), "quit", Qt.QueuedConnection)
         except Exception as e:
-            self._set_status(f"?????? ???????? ??????????: {e}")
+            self._set_status(f"\u041e\u0448\u0438\u0431\u043a\u0430 \u0437\u0430\u0433\u0440\u0443\u0437\u043a\u0438 \u043e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u0438\u044f: {e}")
         finally:
             self._set_busy(False)
 
@@ -232,7 +232,7 @@ class UpdateManager(QObject):
                 return payload
             except Exception as e:
                 last_error = e
-        raise RuntimeError(last_error or "?? ??????? ???????? ?????? ?? ??????????.")
+        raise RuntimeError(last_error or "\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u043f\u043e\u043b\u0443\u0447\u0438\u0442\u044c \u0434\u0430\u043d\u043d\u044b\u0435 \u043e\u0431 \u043e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u0438\u0438.")
 
     @staticmethod
     def _is_newer_version(remote: str, local: str):

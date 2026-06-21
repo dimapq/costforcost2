@@ -1,5 +1,7 @@
 # frontend/controllers/backend_controller.py
 import glob
+import configparser
+import ipaddress
 import os
 import shutil
 import subprocess
@@ -19,19 +21,79 @@ from backend.db.connection import get_connection
 
 
 class BackendController(QObject):
+    def _normalize_connection_mode(self, mode):
+        value = str(mode or "local").strip().lower()
+        return value if value in ("local", "online") else "local"
+
     def _resolve_sslmode(self, host, sslmode=""):
         value = str(sslmode or "").strip()
         if value:
             return value
         host_value = str(host or "").strip().lower()
-        return "disable" if host_value in ("", "localhost", "127.0.0.1", "::1") else "require"
+        if host_value in ("", "localhost", "127.0.0.1", "::1"):
+            return "disable"
+        try:
+            ip_value = ipaddress.ip_address(host_value)
+            if ip_value in ipaddress.ip_network("100.64.0.0/10"):
+                return "disable"
+        except ValueError:
+            pass
+        return "require"
+
+    def _mask_password(self, password):
+        value = str(password or "")
+        if not value:
+            return ""
+        if len(value) <= 4:
+            return "*" * len(value)
+        return value[:2] + "*" * max(4, len(value) - 4) + value[-2:]
+
+    def _build_client_online_config(self, profile):
+        config = configparser.ConfigParser()
+        host = str(profile.get("host", "localhost") or "localhost").strip()
+        port = str(profile.get("port", "5432") or "5432").strip()
+        name = str(profile.get("name", "cost_online_demo") or "cost_online_demo").strip()
+        user = str(profile.get("user", "cost_client_app") or "cost_client_app").strip()
+        password = str(profile.get("password", "") or "")
+        sslmode = self._resolve_sslmode(host, profile.get("sslmode", ""))
+        sslrootcert = str(profile.get("sslrootcert", "") or "").strip()
+
+        config["database"] = {
+            "host": host,
+            "port": port,
+            "name": name,
+            "user": user,
+            "password": password,
+            "sslmode": sslmode,
+            "sslrootcert": sslrootcert,
+        }
+        config["database_online"] = dict(config["database"])
+        config["app"] = {
+            "selected_connection_mode": "online",
+            "connection_confirmed": "true",
+            "connection_confirmed_local": "false",
+            "connection_confirmed_online": "true",
+        }
+        return config
+
+    def _write_client_online_config(self, destination_path=None):
+        from backend.db.config import get_db_profile
+
+        profile = get_db_profile("online")
+        config = self._build_client_online_config(profile)
+        export_dir = self._get_export_dir()
+        path = Path(destination_path) if destination_path else (export_dir / "client_config_online.ini")
+        with open(path, "w", encoding="utf-8") as file:
+            config.write(file)
+        return path, profile
 
     @Slot(result="QVariantMap")
     def getDatabaseConfig(self):
         try:
-            from backend.db.config import get_config, get_config_path, is_connection_confirmed
+            from backend.db.config import get_config, get_config_path, get_selected_connection_mode, is_connection_confirmed
             config = get_config(create_if_missing=True)
             db = config['database']
+            selected_mode = get_selected_connection_mode()
             return {
                 "host": db.get('host', 'localhost'),
                 "port": db.get('port', '5432'),
@@ -40,6 +102,7 @@ class BackendController(QObject):
                 "password": db.get('password', ''),
                 "sslmode": self._resolve_sslmode(db.get('host', 'localhost'), db.get('sslmode', '')),
                 "sslrootcert": db.get('sslrootcert', ''),
+                "selected_mode": selected_mode,
                 "config_path": str(get_config_path()),
                 "connection_confirmed": is_connection_confirmed()
             }
@@ -53,6 +116,7 @@ class BackendController(QObject):
                 "password": "",
                 "sslmode": "disable",
                 "sslrootcert": "",
+                "selected_mode": "local",
                 "config_path": "config.ini",
                 "connection_confirmed": False
             }
@@ -64,6 +128,158 @@ class BackendController(QObject):
             return not is_connection_confirmed()
         except Exception:
             return True
+
+    @Slot(str, result="QVariantMap")
+    def getDatabaseConfigForMode(self, mode):
+        try:
+            from backend.db.config import get_config_path, get_db_profile, get_selected_connection_mode, is_connection_confirmed
+
+            normalized_mode = self._normalize_connection_mode(mode)
+            db = get_db_profile(normalized_mode)
+            return {
+                "host": db.get("host", "localhost"),
+                "port": db.get("port", "5432"),
+                "name": db.get("name", "cost"),
+                "user": db.get("user", "postgres"),
+                "password": db.get("password", ""),
+                "sslmode": self._resolve_sslmode(db.get("host", "localhost"), db.get("sslmode", "")),
+                "sslrootcert": db.get("sslrootcert", ""),
+                "selected_mode": get_selected_connection_mode(),
+                "mode": normalized_mode,
+                "config_path": str(get_config_path()),
+                "connection_confirmed": is_connection_confirmed(normalized_mode)
+            }
+        except Exception as e:
+            print(f"?????? ?????? ??????? ??????????? {mode}: {e}")
+            normalized_mode = self._normalize_connection_mode(mode)
+            return {
+                "host": "localhost",
+                "port": "5432",
+                "name": "cost_online_demo" if normalized_mode == "online" else "cost",
+                "user": "cost_client_app" if normalized_mode == "online" else "postgres",
+                "password": "CostClientApp_2026!" if normalized_mode == "online" else "",
+                "sslmode": "disable" if normalized_mode == "local" else "require",
+                "sslrootcert": "",
+                "selected_mode": "local",
+                "mode": normalized_mode,
+                "config_path": "config.ini",
+                "connection_confirmed": False
+            }
+
+    @Slot(result="QVariantMap")
+    def getOnlineConnectionInfo(self):
+        try:
+            from backend.db.config import get_db_profile
+
+            profile = get_db_profile("online")
+            config = self._build_client_online_config(profile)
+            lines = []
+            for section_name in config.sections():
+                lines.append(f"[{section_name}]")
+                for key, value in config[section_name].items():
+                    lines.append(f"{key} = {value}")
+                lines.append("")
+            return {
+                "ok": True,
+                "host": profile.get("host", "localhost"),
+                "port": profile.get("port", "5432"),
+                "name": profile.get("name", "cost_online_demo"),
+                "user": profile.get("user", "cost_client_app"),
+                "password": profile.get("password", ""),
+                "masked_password": self._mask_password(profile.get("password", "")),
+                "sslmode": self._resolve_sslmode(profile.get("host", "localhost"), profile.get("sslmode", "")),
+                "sslrootcert": profile.get("sslrootcert", ""),
+                "config_text": "\n".join(lines).strip(),
+            }
+        except Exception as e:
+            return {"ok": False, "message": f"Ошибка чтения параметров онлайн-подключения: {e}"}
+
+    @Slot(result="QVariantMap")
+    def exportClientOnlineConfig(self):
+        try:
+            path, _ = self._write_client_online_config()
+            return {"ok": True, "message": "Клиентский config.ini для онлайн-подключения подготовлен.", "path": str(path)}
+        except Exception as e:
+            return {"ok": False, "message": f"Ошибка подготовки клиентского config.ini: {e}", "path": ""}
+
+    @Slot(str, result="QVariantMap")
+    def rotateOnlineDatabasePassword(self, new_password):
+        try:
+            password_value = str(new_password or "")
+            if len(password_value) < 8:
+                return {"ok": False, "message": "Новый пароль должен содержать минимум 8 символов.", "path": ""}
+
+            import psycopg2
+            from backend.db.config import get_config, get_db_profile, save_config
+
+            profile = get_db_profile("online")
+            conn = psycopg2.connect(
+                host=str(profile.get("host", "localhost") or "localhost").strip(),
+                port=int(profile.get("port", "5432") or 5432),
+                dbname=str(profile.get("name", "cost_online_demo") or "cost_online_demo").strip(),
+                user=str(profile.get("user", "cost_client_app") or "cost_client_app").strip(),
+                password=str(profile.get("password", "") or ""),
+                connect_timeout=5,
+                options='-c client_encoding=utf8',
+                sslmode=self._resolve_sslmode(profile.get("host", "localhost"), profile.get("sslmode", "")),
+            )
+            try:
+                conn.autocommit = True
+                with conn.cursor() as cur:
+                    cur.execute(
+                        sql.SQL("ALTER ROLE {} WITH PASSWORD %s").format(
+                            sql.Identifier(str(profile.get("user", "cost_client_app")))
+                        ),
+                        [password_value]
+                    )
+            finally:
+                conn.close()
+
+            config = get_config(create_if_missing=True)
+            if "database_online" not in config:
+                config["database_online"] = {}
+            config["database_online"]["password"] = password_value
+            if config.get("app", "selected_connection_mode", fallback="local").strip().lower() == "online":
+                if "database" not in config:
+                    config["database"] = {}
+                config["database"]["password"] = password_value
+            save_config(config)
+
+            path, _ = self._write_client_online_config()
+            return {
+                "ok": True,
+                "message": "Пароль онлайн-подключения обновлен. Новый клиентский config.ini уже подготовлен.",
+                "path": str(path),
+            }
+        except Exception as e:
+            return {"ok": False, "message": f"Ошибка смены пароля онлайн-подключения: {e}", "path": ""}
+
+    @Slot(result=str)
+    def getSelectedConnectionMode(self):
+        try:
+            from backend.db.config import get_selected_connection_mode
+            return get_selected_connection_mode()
+        except Exception:
+            return "local"
+
+    @Slot(str, result="QVariantMap")
+    def activateDatabaseMode(self, mode):
+        try:
+            from backend.db.config import set_selected_connection_mode
+
+            normalized_mode = self._normalize_connection_mode(mode)
+            path = set_selected_connection_mode(normalized_mode)
+            result = self.getDatabaseConfigForMode(normalized_mode)
+            result["ok"] = True
+            result["message"] = f"????? ??????????? ??????: {normalized_mode}"
+            result["config_path"] = str(path)
+            return result
+        except Exception as e:
+            return {
+                "ok": False,
+                "message": f"?????? ?????? ?????? ???????????: {e}",
+                "mode": self._normalize_connection_mode(mode)
+            }
 
     @Slot(str, str, str, str, str, result="QVariantMap")
     def testDatabaseConfig(self, host, port, name, user, password):
@@ -99,6 +315,27 @@ class BackendController(QObject):
             return {"ok": True, "message": f"Подключение сохранено: {path}"}
         except Exception as e:
             return {"ok": False, "message": f"Ошибка сохранения config.ini: {e}"}
+
+    @Slot(str, str, str, str, str, str, result="QVariantMap")
+    def saveDatabaseConfigForMode(self, mode, host, port, name, user, password):
+        try:
+            normalized_mode = self._normalize_connection_mode(mode)
+            test = self.testDatabaseConfig(host, port, name, user, password)
+            if not test.get("ok"):
+                return test
+            from backend.db.config import save_db_config
+            path = save_db_config(host, port, name, user, password, confirmed=True, mode=normalized_mode)
+            return {
+                "ok": True,
+                "message": f"??????? {normalized_mode} ????????: {path}",
+                "mode": normalized_mode
+            }
+        except Exception as e:
+            return {
+                "ok": False,
+                "message": f"?????? ?????????? ??????? ???????????: {e}",
+                "mode": self._normalize_connection_mode(mode)
+            }
 
     def _get_export_dir(self):
         export_dir = Path.cwd() / "exports"

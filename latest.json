@@ -1,6 +1,6 @@
 {
-  "version": "1.4.0",
+  "version": "1.5.0",
   "url": "https://github.com/dimapq/costforcost2/releases/latest/download/MachineCostPro.zip",
-  "notes": "Release v1.4. Includes current fixes, updated packaging, and refresh for the auto-update channel.",
-  "sha256": "290dac3a3f7af46aaa8fc8b8eb68c1e2b66cb9ae938fb7f87223abc4009ec8d5"
+  "notes": "Release v1.5. Includes online database preparation via Tailscale, client connection config export, online connection info dialog, and password rotation for the online profile.",
+  "sha256": "077afb9feb695d7132305be4359ad9a39a6bc23eed3dc34d58581710249b26cd"
 }
