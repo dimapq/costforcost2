@@ -5,3 +5,4 @@ __pycache__/
 *.pyc
 *.pyo
 ~$*
+exports/database_dump_*.sql
