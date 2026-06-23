@@ -1,6 +1,6 @@
 {
-  "version": "1.5.0",
+  "version": "1.6",
   "url": "https://github.com/dimapq/costforcost2/releases/latest/download/MachineCostPro.zip",
-  "notes": "Release v1.5. Includes online database preparation via Tailscale, client connection config export, online connection info dialog, and password rotation for the online profile.",
-  "sha256": "077afb9feb695d7132305be4359ad9a39a6bc23eed3dc34d58581710249b26cd"
+  "notes": "Release v1.6. Includes online-only connection flow, expanded settings, full autotest suite with FIFO/cost/inventory/transactions/indirect costs/reports/export checks, and randomized formula validation in autotests.",
+  "sha256": "100FB07894D845412B539374C665D31EB73316CF59671F210DA3EEA1E8263605"
 }

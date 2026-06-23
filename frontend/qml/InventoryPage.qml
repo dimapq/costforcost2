@@ -14,10 +14,10 @@ Page {
     TabBar {
         id: bar
         width: parent.width
-        TabButton { text: "Materials" }
-        TabButton { text: "Composite Materials" }
-        TabButton { text: "Plate Cutting" }
-        TabButton { text: "Tools" }
+        TabButton { text: "Материалы" }
+        TabButton { text: "Составные материалы" }
+        TabButton { text: "Раскрой плит" }
+        TabButton { text: "Инструменты" }
     }
 
     StackLayout {
@@ -28,7 +28,7 @@ Page {
         anchors.bottom: parent.bottom
         currentIndex: bar.currentIndex
 
-        // ================= Р’РљР›РђР”РљРђ РњРђРўР•Р РРђР›Р« =================
+        // ================= ВКЛАДКА МАТЕРИАЛЫ =================
         Item {
             id: materialsTab
             property int selectedMaterialRow: -1
@@ -76,16 +76,16 @@ Page {
                         onClicked: manualAddDialog.open()
                     }
                     Button {
-                        text: "Parse by link"
+                        text: "Добавить по ссылке"
                         onClicked: parseDialog.open()
                     }
                     Button {
-                        text: "Inventory count"
+                        text: "Инвентаризация"
                         onClicked: inventoryDialog.open()
                     }
                     Item { Layout.fillWidth: true }
                     Button {
-                        text: "Change quantity"
+                        text: "Изменить количество"
                         enabled: materialsTab.selectedMaterialId > 0
                         highlighted: materialsTab.selectedMaterialId > 0
                         onClicked: {
@@ -131,7 +131,7 @@ Page {
                         anchors.fill: parent
                         spacing: 0
                         Repeater {
-                            model: ["ID", "Name", "Category", "Stock", "Unit Price", "Amount", "Used In", "Source", "Notes", "Updated"]
+                            model: ["ID", "Название", "Категория", "Остаток", "Цена за ед.", "Сумма", "Используется в", "Откуда взят", "Примечание", "Дата обновления"]
                             Rectangle {
                                 width: index === 0 ? 50 : index === 1 ? 220 : index === 2 ? 130 : index === 3 ? 90 : index === 4 ? 110 : index === 5 ? 110 : index === 6 ? 220 : index === 7 ? 200 : index === 8 ? 240 : 130
                                 height: 34
@@ -215,16 +215,17 @@ Page {
                 standardButtons: Dialog.Ok | Dialog.Cancel
                 width: 500
                 height: 700
-                ScrollView {
-                    anchors.fill: parent
+                modal: true
+                contentItem: ScrollView {
                     clip: true
+                    ScrollBar.vertical.policy: ScrollBar.AsNeeded
                     ColumnLayout {
-                        width: manualAddDialog.availableWidth
+                        width: Math.max(manualAddDialog.availableWidth - 24, 320)
                         spacing: 10
                         Label { text: "Название:" }
                         TextField { id: matName; Layout.fillWidth: true }
                         Label { text: "Единица измерения:" }
-                        TextField { id: matUnit; Layout.fillWidth: true; text: "С€С‚" }
+                        TextField { id: matUnit; Layout.fillWidth: true; text: "шт" }
                         Label { text: "Цена за единицу (руб):" }
                         TextField { id: matPrice; Layout.fillWidth: true; validator: DoubleValidator { bottom: 0.01 } }
                         Label { text: "Количество:" }
@@ -258,7 +259,7 @@ Page {
                         )
                         materialModel.refresh()
                         matName.clear()
-                        matUnit.text = "С€С‚"
+                        matUnit.text = "шт"
                         matPrice.clear()
                         matQty.clear()
                         matSource.clear()
@@ -332,7 +333,7 @@ Page {
 
             Dialog {
                 id: editQtyDialog
-                title: "Change quantity"
+                title: "Изменить количество"
                 standardButtons: Dialog.Ok | Dialog.Cancel
                 width: 420
                 height: 260
@@ -387,7 +388,7 @@ Page {
                     Label {
                         Layout.fillWidth: true
                         wrapMode: Text.WordWrap
-                        text: "Удалить со склада материал '" + materialsTab.selectedMaterialName + "'?\nОстаток будет установлен в 0."
+                        text: "Удалить со склада материал \"" + materialsTab.selectedMaterialName + "\"?\nОстаток будет установлен в 0."
                     }
                     Label { text: "Причина (необязательно):" }
                     TextField {
@@ -427,7 +428,7 @@ Page {
                     Label { text: "Единица измерения:" }
                     TextField { id: editMaterialUnitField; Layout.fillWidth: true; placeholderText: "шт, м, кг..." }
 
-                    Label { text: "Остаток на складе:" }
+                    Label { text: "Количество:" }
                     TextField { id: editMaterialQtyField; Layout.fillWidth: true; validator: DoubleValidator { bottom: 0 } }
 
                     Label { text: "Цена за единицу (оставьте пустым, если не менять):" }
@@ -485,14 +486,14 @@ Page {
             }
         }
 
-        // ================= Р’РљР›РђР”РљРђ РЎРћРЎРўРђР’Р›Р•РќРР• РњРђРўР•Р РРђР›РћР’ =================
+        // ================= СОСТАВНЫЕ МАТЕРИАЛЫ =================
         Item {
             id: compositeTab
             property int selectedRecipeRow: -1
             property int selectedRecipeId: -1
             property int selectedOutputMaterialId: -1
             property string selectedRecipeName: ""
-            property string selectedRecipeUnit: "С€С‚"
+            property string selectedRecipeUnit: "шт"
             property real selectedOutputQuantity: 1
             property string statusMessage: ""
 
@@ -529,14 +530,12 @@ Page {
             function resetDraftRecipe() {
                 compositeRecipeDraftModel.clear()
                 compositeNameField.clear()
-                compositeUnitField.text = "С€С‚"
+                compositeUnitField.text = "шт"
                 compositeOutputQtyField.text = "1"
                 compositeSourceField.text = "Составной материал"
                 compositeNotesField.clear()
                 compositeUpdatedDateField.text = new Date().toISOString().slice(0, 10)
                 compositeLowThresholdField.text = "1"
-                compositeEnoughThresholdField.text = "3"
-                compositeComponentQtyField.text = "1"
                 compositeStatusLabel.text = ""
             }
 
@@ -627,7 +626,7 @@ Page {
                                             compositeTab.selectedRecipeId = recipe_id
                                             compositeTab.selectedOutputMaterialId = material_id
                                             compositeTab.selectedRecipeName = name || ""
-                                            compositeTab.selectedRecipeUnit = unit || "С€С‚"
+                                            compositeTab.selectedRecipeUnit = unit || "шт"
                                             compositeTab.selectedOutputQuantity = output_quantity || 1
                                             compositeTab.reloadRecipeItems(recipe_id)
                                         }
@@ -668,7 +667,7 @@ Page {
                                     placeholderText: "Например: плановая сборка"
                                 }
                                 Button {
-                                    text: "Produce"
+                                    text: "Изготовить"
                                     enabled: compositeTab.selectedRecipeId > 0
                                     onClicked: {
                                         var result = backend.craftCompositeMaterial(
@@ -767,7 +766,7 @@ Page {
                         Label { text: "Название:" }
                         TextField { id: compositeNameField; Layout.fillWidth: true }
                         Label { text: "Единица измерения:" }
-                        TextField { id: compositeUnitField; Layout.fillWidth: true; text: "С€С‚" }
+                        TextField { id: compositeUnitField; Layout.fillWidth: true; text: "шт" }
                         Label { text: "Количество на выходе:" }
                         TextField { id: compositeOutputQtyField; Layout.fillWidth: true; text: "1"; validator: DoubleValidator { bottom: 0.01 } }
                         Label { text: "Откуда взят:" }
@@ -887,7 +886,7 @@ Page {
                     Label {
                         Layout.fillWidth: true
                         wrapMode: Text.WordWrap
-                        text: "Удалить рецепт составного материала '" + compositeTab.selectedRecipeName + "'?"
+                        text: "Удалить рецепт составного материала \"" + compositeTab.selectedRecipeName + "\"?"
                     }
                 }
                 onAccepted: {
@@ -906,16 +905,16 @@ Page {
             Component.onCompleted: reloadRecipes()
         }
 
-        // ================= Р вЂ™Р С™Р вЂєР С’Р вЂќР С™Р С’ Р В Р С’Р РЋР С™Р В Р С›Р в„ў Р СџР вЂєР ВР Сћ =================
+        // ================= ВКЛАДКА РАСКРОЙ ПЛИТ =================
         Item {
             id: plateCutTab
             property int selectedTemplateRow: -1
             property int selectedTemplateId: -1
             property string selectedTemplateName: ""
-            property string selectedTemplateUnit: "С€С‚"
             property int selectedTemplateMinutes: 0
             property int selectedTemplateMaterialTypeId: -1
             property string selectedTemplateMaterialTypeName: ""
+            property string selectedTemplateUnit: "шт"
             property string selectedTemplateDrawingPath: ""
             property string selectedTemplateProcessPath: ""
             property string selectedTemplateDrawingName: ""
@@ -950,7 +949,7 @@ Page {
                 if (hours > 0 && rest > 0)
                     return hours + " ч " + rest + " мин"
                 if (hours > 0)
-                    return hours + " С‡"
+                    return hours + " ч"
                 return rest + " мин"
             }
 
@@ -970,7 +969,7 @@ Page {
                 selectedTemplateRow = -1
                 selectedTemplateId = -1
                 selectedTemplateName = ""
-                selectedTemplateUnit = "С€С‚"
+                selectedTemplateUnit = "шт"
                 selectedTemplateMinutes = 0
                 selectedTemplateMaterialTypeId = -1
                 selectedTemplateMaterialTypeName = ""
@@ -1006,7 +1005,7 @@ Page {
                         name: item.name || "",
                         material_type_id: item.material_type_id !== undefined ? item.material_type_id : -1,
                         material_type_name: item.material_type_name || "",
-                        part_unit: item.part_unit || "С€С‚",
+                        part_unit: item.part_unit || "шт",
                         production_minutes: item.production_minutes !== undefined ? item.production_minutes : 0,
                         drawing_file_path: item.drawing_file_path || "",
                         process_file_path: item.process_file_path || "",
@@ -1087,7 +1086,7 @@ Page {
                         }
                     }
                     Button {
-                        text: "Produce part"
+                        text: "Изготовить деталь"
                         enabled: plateCutTab.selectedTemplateId > 0 && plateCutTab.selectedPurchaseId > 0
                         highlighted: enabled
                         onClicked: plateCutTab.openManufactureDialog()
@@ -1161,7 +1160,7 @@ Page {
                                             plateCutTab.selectedTemplateRow = index
                                             plateCutTab.selectedTemplateId = template_id
                                             plateCutTab.selectedTemplateName = name || ""
-                                            plateCutTab.selectedTemplateUnit = part_unit || "С€С‚"
+                                            plateCutTab.selectedTemplateUnit = part_unit || "шт"
                                             plateCutTab.selectedTemplateMinutes = production_minutes || 0
                                             plateCutTab.selectedTemplateMaterialTypeId = material_type_id || -1
                                             plateCutTab.selectedTemplateMaterialTypeName = material_type_name || ""
@@ -1230,7 +1229,7 @@ Page {
                                     anchors.fill: parent
                                     spacing: 0
                                     Repeater {
-                                        model: ["Lot ID", "Plate", "Remaining", "Price", "Date", "Source"]
+                                        model: ["ID партии", "Плита", "Остаток", "Цена", "Дата", "Откуда взято"]
                                         Rectangle {
                                             width: index === 0 ? 90 : index === 1 ? 210 : index === 2 ? 110 : index === 3 ? 90 : index === 4 ? 110 : 180
                                             height: 34
@@ -1291,12 +1290,12 @@ Page {
                                     anchors.fill: parent
                                     anchors.margins: 8
                                     spacing: 6
-                                    Label { text: plateCutTab.selectedPurchaseId > 0 ? "Plate: lot #" + plateCutTab.selectedPurchaseId : "Plate not selected"; font.bold: true }
-                                    Label { text: "Material: " + (plateCutTab.selectedMaterialName || "-") }
-                                    Label { text: "Remaining: " + (plateCutTab.selectedPurchaseId > 0 ? Number(plateCutTab.selectedRemaining).toFixed(4) + " " + plateCutTab.selectedUnit : "-") }
-                                    Label { text: "Price: " + (plateCutTab.selectedPurchaseId > 0 ? Number(plateCutTab.selectedPrice).toFixed(2) + " rub./" + plateCutTab.selectedUnit : "-") }
-                                    Label { text: "Source: " + (plateCutTab.selectedLotSource || "-"); Layout.fillWidth: true; wrapMode: Text.WordWrap }
-                                    Label { text: "Notes: " + (plateCutTab.selectedLotNotes || "-"); Layout.fillWidth: true; wrapMode: Text.WordWrap }
+                                    Label { text: plateCutTab.selectedPurchaseId > 0 ? "Плита: партия #" + plateCutTab.selectedPurchaseId : "Плита не выбрана"; font.bold: true }
+                                    Label { text: "Материал: " + (plateCutTab.selectedMaterialName || "-") }
+                                    Label { text: "Остаток: " + (plateCutTab.selectedPurchaseId > 0 ? Number(plateCutTab.selectedRemaining).toFixed(4) + " " + plateCutTab.selectedUnit : "-") }
+                                    Label { text: "Цена: " + (plateCutTab.selectedPurchaseId > 0 ? Number(plateCutTab.selectedPrice).toFixed(2) + " руб./" + plateCutTab.selectedUnit : "-") }
+                                    Label { text: "Откуда взято: " + (plateCutTab.selectedLotSource || "-"); Layout.fillWidth: true; wrapMode: Text.WordWrap }
+                                    Label { text: "Примечание: " + (plateCutTab.selectedLotNotes || "-"); Layout.fillWidth: true; wrapMode: Text.WordWrap }
                                 }
                             }
                         }
@@ -1321,13 +1320,12 @@ Page {
                         TextField { id: templateNameField; Layout.fillWidth: true; placeholderText: "Например: Боковая панель 420x300" }
                         Label { text: "Материал плиты:" }
                         ComboBox { id: templateMaterialTypeCombo; Layout.fillWidth: true; model: plateMaterialTypesModel; textRole: "name" }
-                        Label { text: "Единица измерения детали:" }
-                        TextField { id: templateUnitField; Layout.fillWidth: true; text: "С€С‚" }
+                        Label { text: "Единица измерения:" }
+                        TextField { id: templateUnitField; Layout.fillWidth: true; text: "шт" }
                         Label { text: "Время изготовления (минут):" }
                         TextField { id: templateMinutesField; Layout.fillWidth: true; text: "0"; validator: IntValidator { bottom: 0 } }
                         Label { text: "Файл чертежа:" }
                         RowLayout {
-                            Layout.fillWidth: true
                             TextField { id: templateDrawingField; Layout.fillWidth: true; placeholderText: "Путь к файлу чертежа" }
                             Button { text: "Выбрать"; onClicked: drawingFileDialog.open() }
                         }
@@ -1362,7 +1360,7 @@ Page {
                     if (result.ok) {
                         plateCutTab.reloadTemplates()
                         templateNameField.clear()
-                        templateUnitField.text = "С€С‚"
+                        templateUnitField.text = "шт"
                         templateMinutesField.text = "0"
                         templateDrawingField.clear()
                         templateProcessField.clear()
@@ -1444,7 +1442,7 @@ Page {
 
             Dialog {
                 id: manufactureDialog
-                title: "Produce part from plate"
+                title: "Изготовить деталь из плиты"
                 standardButtons: Dialog.Ok | Dialog.Cancel
                 width: 560
                 height: 420
@@ -1461,7 +1459,7 @@ Page {
                     Label {
                         Layout.fillWidth: true
                         wrapMode: Text.WordWrap
-                        text: "Плита: партия #" + plateCutTab.selectedPurchaseId + " — " + plateCutTab.selectedMaterialName + ", остаток " + Number(plateCutTab.selectedRemaining).toFixed(4) + " " + plateCutTab.selectedUnit
+                        text: "Плита: партия #" + plateCutTab.selectedPurchaseId + " - " + plateCutTab.selectedMaterialName + ", остаток " + Number(plateCutTab.selectedRemaining).toFixed(4) + " " + plateCutTab.selectedUnit
                     }
                     Label { text: "Сколько списать с плиты (м²):" }
                     TextField {
@@ -1514,7 +1512,7 @@ Page {
                     Label {
                         Layout.fillWidth: true
                         wrapMode: Text.WordWrap
-                        text: "Delete template \"" + plateCutTab.selectedTemplateName + "\"? Production history will remain."
+                        text: "Удалить шаблон \"" + plateCutTab.selectedTemplateName + "\"? История производства останется."
                     }
                 }
 
@@ -1578,7 +1576,6 @@ Page {
                 onAccepted: templateProcessField.text = plateCutTab.normalizeFilePath(selectedFile)
             }
 
-
             FileDialog {
                 id: exportDrawingDialog
                 title: "Сохранить чертеж"
@@ -1612,7 +1609,7 @@ Page {
             }
         }
 
-        // ================= Р’РљР›РђР”РљРђ РРќРЎРўР РЈРњР•РќРўР« =================
+        // ================= ВКЛАДКА ИНСТРУМЕНТЫ =================
         Item {
             ColumnLayout {
                 anchors.fill: parent
@@ -1688,7 +1685,7 @@ Page {
                     spacing: 10
                     Label { text: "Название:" }
                     TextField { id: toolName; Layout.fillWidth: true }
-                    Label { text: "Inventory number:" }
+                    Label { text: "Инвентарный номер:" }
                     TextField { id: invNum; Layout.fillWidth: true }
                     Label { text: "Стоимость покупки:" }
                     TextField { id: toolCost; Layout.fillWidth: true; validator: DoubleValidator { bottom: 0.01 } }
@@ -1778,8 +1775,3 @@ Page {
         toolsModel.refresh()
     }
 }
-
-
-
-
-

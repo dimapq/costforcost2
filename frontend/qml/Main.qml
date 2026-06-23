@@ -11,14 +11,13 @@ ApplicationWindow {
     title: appTitle
 
     property bool connectionReady: false
-    property bool startupModeChosen: false
     property string connectionMessage: ""
     property string settingsActionMessage: ""
     property string settingsActionPath: ""
     property string selectedDumpPath: ""
-    property string selectedConnectionMode: ""
-    property string connectionDialogTitleText: "\u041f\u043e\u0434\u043a\u043b\u044e\u0447\u0435\u043d\u0438\u0435 \u043a \u0431\u0430\u0437\u0435 \u0434\u0430\u043d\u043d\u044b\u0445"
-    property string connectionDialogHintText: "\u041f\u0440\u043e\u0432\u0435\u0440\u044c\u0442\u0435 \u043f\u0430\u0440\u0430\u043c\u0435\u0442\u0440\u044b \u0438 \u043d\u0430\u0436\u043c\u0438\u0442\u0435 \u00ab\u0421\u043e\u0445\u0440\u0430\u043d\u0438\u0442\u044c \u0438 \u043f\u043e\u0434\u043a\u043b\u044e\u0447\u0438\u0442\u044c\u0441\u044f\u00bb."
+    property string selectedConnectionMode: "online"
+    property string connectionDialogTitleText: "Подключение к онлайн-базе"
+    property string connectionDialogHintText: "Введите параметры онлайн-базы и нажмите «Сохранить и подключиться». После успешного входа параметры сохраняются в config.ini и используются автоматически при следующем запуске."
     property string onlineConfigPreview: ""
     property string onlineConfigExportPath: ""
     property string onlineHostValue: ""
@@ -26,6 +25,9 @@ ApplicationWindow {
     property string onlineDbNameValue: ""
     property string onlineUserValue: ""
     property string onlinePasswordMaskedValue: ""
+    property string fifoAutotestMessage: "Автотест FIFO ещё не запускался."
+    property string fifoAutotestDetails: ""
+    property color fifoAutotestColor: "#bcbcbc"
     property var backendObj: (typeof backend !== "undefined") ? backend : null
     property var updateManagerObj: (typeof updateManager !== "undefined") ? updateManager : null
     property string userManualText: "User Manual\n\n"
@@ -109,9 +111,8 @@ ApplicationWindow {
         MenuItem {
             text: "Настройка подключения"
             onTriggered: {
-                if (!root.selectedConnectionMode)
-                    root.selectedConnectionMode = "local"
-                loadDatabaseConfig(root.selectedConnectionMode)
+                root.selectedConnectionMode = "online"
+                loadDatabaseConfig("online")
                 root.connectionMessage = ""
                 connectionDialog.open()
             }
@@ -174,6 +175,18 @@ ApplicationWindow {
         MenuSeparator { }
 
         MenuItem {
+            text: "Автотесты"
+            onTriggered: {
+                root.fifoAutotestMessage = "Автотест FIFO ещё не запускался."
+                root.fifoAutotestDetails = ""
+                root.fifoAutotestColor = "#bcbcbc"
+                autotestsDialog.open()
+            }
+        }
+
+        MenuSeparator { }
+
+        MenuItem {
             text: "\u041f\u0440\u043e\u0432\u0435\u0440\u0438\u0442\u044c \u043e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u0438\u044f"
             onTriggered: { if (updateManagerObj) updateManagerObj.checkForUpdates(true) }
         }
@@ -211,48 +224,26 @@ ApplicationWindow {
             spacing: 12
 
             Label {
-                text: !root.startupModeChosen
-                      ? "Выбор режима подключения"
-                      : "Настройка подключения к базе данных"
+                text: "Подключение к онлайн-базе"
                 font.pixelSize: 24
                 font.bold: true
                 Layout.alignment: Qt.AlignHCenter
             }
             Label {
-                text: !root.startupModeChosen
-                      ? "Выберите, куда подключаться при входе: к онлайн-базе или к локальной базе. Локальный режим пока работает как заглушка через localhost."
-                      : root.connectionDialogHintText
+                text: root.connectionDialogHintText
                 color: "#555"
                 wrapMode: Text.WordWrap
                 Layout.fillWidth: true
                 horizontalAlignment: Text.AlignHCenter
             }
 
-            RowLayout {
-                Layout.alignment: Qt.AlignHCenter
-                spacing: 12
-                visible: !root.startupModeChosen
-
-                Button {
-                    text: "Онлайн-база"
-                    highlighted: true
-                    onClicked: root.beginConnectionFlow("online")
-                }
-
-                Button {
-                    text: "Локальная база"
-                    onClicked: root.beginConnectionFlow("local")
-                }
-            }
-
             Button {
-                text: "Назад к выбору"
+                text: "Настроить подключение"
                 Layout.alignment: Qt.AlignHCenter
-                visible: root.startupModeChosen && !root.connectionReady
                 onClicked: {
-                    root.startupModeChosen = false
-                    root.selectedConnectionMode = ""
                     root.connectionMessage = ""
+                    loadDatabaseConfig("online")
+                    connectionDialog.open()
                 }
             }
         }
@@ -293,16 +284,16 @@ ApplicationWindow {
                 rowSpacing: 8
 
                 Label { text: "Host:" }
-                TextField { id: dbHostField; Layout.fillWidth: true; placeholderText: "localhost" }
+                TextField { id: dbHostField; Layout.fillWidth: true; placeholderText: "100.86.4.84" }
 
                 Label { text: "Port:" }
                 TextField { id: dbPortField; Layout.fillWidth: true; placeholderText: "5432"; validator: IntValidator { bottom: 1; top: 65535 } }
 
                 Label { text: "Database:" }
-                TextField { id: dbNameField; Layout.fillWidth: true; placeholderText: "cost" }
+                TextField { id: dbNameField; Layout.fillWidth: true; placeholderText: "cost_online_demo" }
 
                 Label { text: "User:" }
-                TextField { id: dbUserField; Layout.fillWidth: true; placeholderText: "postgres" }
+                TextField { id: dbUserField; Layout.fillWidth: true; placeholderText: "cost_client_app" }
 
                 Label { text: "Password:" }
                 TextField { id: dbPasswordField; Layout.fillWidth: true; echoMode: TextInput.Password }
@@ -332,7 +323,7 @@ ApplicationWindow {
                     text: "Сохранить и подключиться"
                     highlighted: true
                     onClicked: {
-                        var result = backendObj ? backendObj.saveDatabaseConfigForMode(root.selectedConnectionMode || "local", dbHostField.text, dbPortField.text, dbNameField.text, dbUserField.text, dbPasswordField.text) : {"ok": false, "message": "?????? ??????????"}
+                        var result = backendObj ? backendObj.saveDatabaseConfigForMode("online", dbHostField.text, dbPortField.text, dbNameField.text, dbUserField.text, dbPasswordField.text) : {"ok": false, "message": "Бэкенд недоступен"}
                         root.connectionMessage = result.message
                         if (result.ok) {
                             root.connectionReady = true
@@ -904,6 +895,127 @@ ApplicationWindow {
     }
 
     Dialog {
+        id: autotestsDialog
+        title: "Автотесты"
+        modal: true
+        width: 760
+        height: 620
+
+        ListModel { id: autotestResultsModel }
+
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 12
+
+            Label {
+                text: "Автотесты выполняют безопасные проверки: часть работает только на чтение, а часть использует транзакции с откатом."
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                color: "#fafafa"
+                border.color: "#dddddd"
+                radius: 6
+
+                ListView {
+                    anchors.fill: parent
+                    anchors.margins: 8
+                    clip: true
+                    spacing: 8
+                    model: autotestResultsModel
+                    delegate: Rectangle {
+                        width: ListView.view ? ListView.view.width : 0
+                        height: autotestColumn.implicitHeight + 14
+                        radius: 6
+                        border.color: indicator === "green" ? "#84c784" : "#e59a9a"
+                        color: indicator === "green" ? "#eef9ee" : "#fff1f1"
+
+                        ColumnLayout {
+                            id: autotestColumn
+                            anchors.fill: parent
+                            anchors.margins: 8
+                            spacing: 4
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 8
+
+                                Rectangle {
+                                    width: 18
+                                    height: 18
+                                    radius: 9
+                                    color: indicator === "green" ? "#4caf50" : "#d9534f"
+                                    border.color: "#666"
+                                    border.width: 1
+                                }
+
+                                Label {
+                                    text: name
+                                    font.bold: true
+                                }
+
+                                Item { Layout.fillWidth: true }
+                            }
+
+                            Label {
+                                text: message
+                                wrapMode: Text.WordWrap
+                                Layout.fillWidth: true
+                            }
+
+                            Label {
+                                text: details
+                                visible: details.length > 0
+                                wrapMode: Text.WordWrap
+                                Layout.fillWidth: true
+                                color: "#555"
+                            }
+                        }
+                    }
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                Button {
+                    text: "Запустить все автотесты"
+                    highlighted: true
+                    onClicked: {
+                        autotestResultsModel.clear()
+                        var results = backendObj ? backendObj.runAllAutotests() : []
+                        if (!results || results.length === 0) {
+                            autotestResultsModel.append({
+                                name: "Автотесты",
+                                indicator: "red",
+                                message: "Не удалось получить результаты автотестов.",
+                                details: backendObj ? "" : "Бэкенд недоступен."
+                            })
+                            return
+                        }
+                        for (var i = 0; i < results.length; i++) {
+                            var item = results[i] || {}
+                            autotestResultsModel.append({
+                                name: item.name || ("Тест " + (i + 1)),
+                                indicator: item.indicator || "red",
+                                message: item.message || "",
+                                details: item.details || ""
+                            })
+                        }
+                    }
+                }
+                Item { Layout.fillWidth: true }
+                Button {
+                    text: "Закрыть"
+                    onClicked: autotestsDialog.close()
+                }
+            }
+        }
+    }
+
+    Dialog {
         id: settingsResultDialog
         title: "\u0420\u0435\u0437\u0443\u043b\u044c\u0442\u0430\u0442"
         modal: true
@@ -944,38 +1056,19 @@ ApplicationWindow {
         return value
     }
 
-    function isLocalModeHost(hostValue) {
-        var value = (hostValue || "").toString().toLowerCase()
-        return value === "" || value === "localhost" || value === "127.0.0.1" || value === "::1"
-    }
-
-    function updateConnectionModeTexts(mode) {
-        if (mode === "online") {
-            root.connectionDialogTitleText = "Подключение к онлайн-базе"
-            root.connectionDialogHintText = "Введите параметры онлайн-базы и выполните вход. Пока используется тот же экран подключения, что и для локальной базы."
-        } else {
-            root.connectionDialogTitleText = "Подключение к локальной базе"
-            root.connectionDialogHintText = "Локальная база пока работает как заглушка по старой схеме. Проверьте localhost-параметры и нажмите «Сохранить и подключиться»."
-        }
+    function updateConnectionModeTexts() {
+        root.connectionDialogTitleText = "Подключение к онлайн-базе"
+        root.connectionDialogHintText = "Введите параметры онлайн-базы и нажмите «Сохранить и подключиться». После успешного входа параметры сохраняются в config.ini и используются автоматически при следующем запуске."
     }
 
     function loadDatabaseConfig(mode) {
-        var useMode = mode || root.selectedConnectionMode || "local"
-        var cfg = backendObj ? backendObj.getDatabaseConfigForMode(useMode) : {}
-        updateConnectionModeTexts(useMode)
-        if (useMode === "local" && !isLocalModeHost(cfg.host || "")) {
-            dbHostField.text = "localhost"
-            dbPortField.text = "5432"
-            dbNameField.text = "cost"
-            dbUserField.text = "postgres"
-            dbPasswordField.text = ""
-        } else {
-            dbHostField.text = cfg.host || "localhost"
-            dbPortField.text = cfg.port || "5432"
-            dbNameField.text = cfg.name || "cost"
-            dbUserField.text = cfg.user || "postgres"
-            dbPasswordField.text = cfg.password || ""
-        }
+        var cfg = backendObj ? backendObj.getDatabaseConfigForMode("online") : {}
+        updateConnectionModeTexts()
+        dbHostField.text = cfg.host || "localhost"
+        dbPortField.text = cfg.port || "5432"
+        dbNameField.text = cfg.name || "cost_online_demo"
+        dbUserField.text = cfg.user || "cost_client_app"
+        dbPasswordField.text = cfg.password || ""
         configPathLabel.text = "Файл настроек: " + (cfg.config_path || "config.ini")
     }
 
@@ -996,39 +1089,32 @@ ApplicationWindow {
         root.onlineConfigPreview = info.config_text || ""
     }
     function beginConnectionFlow(mode) {
-        var useMode = mode || "local"
-        root.selectedConnectionMode = useMode
-        root.startupModeChosen = true
+        root.selectedConnectionMode = "online"
         root.connectionReady = false
         root.connectionMessage = ""
-        loadDatabaseConfig(useMode)
-        var cfg = backendObj ? backendObj.activateDatabaseMode(useMode) : {}
-        var configMatchesMode = useMode === "local"
-                                ? isLocalModeHost(cfg.host || "")
-                                : !isLocalModeHost(cfg.host || "")
-        if (backendObj && cfg.connection_confirmed && configMatchesMode && backendObj.testDatabaseConfig(cfg.host, cfg.port, cfg.name, cfg.user, cfg.password).ok) {
+        loadDatabaseConfig("online")
+        var cfg = backendObj ? backendObj.activateDatabaseMode("online") : {}
+        if (backendObj && cfg.connection_confirmed && backendObj.testDatabaseConfig(cfg.host, cfg.port, cfg.name, cfg.user, cfg.password).ok) {
             root.connectionReady = true
             return
         }
-        if (cfg.connection_confirmed && configMatchesMode)
+        if (cfg.connection_confirmed)
             root.connectionMessage = "Не удалось подключиться. Проверьте параметры."
-        else if (useMode === "online")
-            root.connectionMessage = "Выполните вход в онлайн-базу."
         else
-            root.connectionMessage = "Локальная база пока подключается по старой схеме через localhost."
+            root.connectionMessage = "Введите параметры онлайн-базы."
         connectionDialog.open()
     }
 
     Component.onCompleted: {
-        var startupMode = backendObj ? backendObj.getSelectedConnectionMode() : "local"
-        updateConnectionModeTexts(startupMode)
-        loadDatabaseConfig(startupMode)
+        var startupMode = "online"
+        updateConnectionModeTexts()
+        loadDatabaseConfig("online")
         root.connectionReady = false
-        root.startupModeChosen = false
         root.selectedConnectionMode = startupMode
         root.connectionMessage = ""
         if (updateManagerObj && updateManagerObj.enabled)
             updateManagerObj.checkForUpdates(false)
+        beginConnectionFlow("online")
     }
 
 }

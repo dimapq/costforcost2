@@ -3,8 +3,10 @@ import glob
 import configparser
 import ipaddress
 import os
+import random
 import shutil
 import subprocess
+from datetime import date, timedelta
 from pathlib import Path
 
 from PySide6.QtCore import QObject, Slot
@@ -22,8 +24,7 @@ from backend.db.connection import get_connection
 
 class BackendController(QObject):
     def _normalize_connection_mode(self, mode):
-        value = str(mode or "local").strip().lower()
-        return value if value in ("local", "online") else "local"
+        return "online"
 
     def _resolve_sslmode(self, host, sslmode=""):
         value = str(sslmode or "").strip()
@@ -71,7 +72,6 @@ class BackendController(QObject):
         config["app"] = {
             "selected_connection_mode": "online",
             "connection_confirmed": "true",
-            "connection_confirmed_local": "false",
             "connection_confirmed_online": "true",
         }
         return config
@@ -97,8 +97,8 @@ class BackendController(QObject):
             return {
                 "host": db.get('host', 'localhost'),
                 "port": db.get('port', '5432'),
-                "name": db.get('name', 'cost'),
-                "user": db.get('user', 'postgres'),
+                "name": db.get('name', 'cost_online_demo'),
+                "user": db.get('user', 'cost_client_app'),
                 "password": db.get('password', ''),
                 "sslmode": self._resolve_sslmode(db.get('host', 'localhost'), db.get('sslmode', '')),
                 "sslrootcert": db.get('sslrootcert', ''),
@@ -111,12 +111,12 @@ class BackendController(QObject):
             return {
                 "host": "localhost",
                 "port": "5432",
-                "name": "cost",
-                "user": "postgres",
+                "name": "cost_online_demo",
+                "user": "cost_client_app",
                 "password": "",
                 "sslmode": "disable",
                 "sslrootcert": "",
-                "selected_mode": "local",
+                "selected_mode": "online",
                 "config_path": "config.ini",
                 "connection_confirmed": False
             }
@@ -134,13 +134,13 @@ class BackendController(QObject):
         try:
             from backend.db.config import get_config_path, get_db_profile, get_selected_connection_mode, is_connection_confirmed
 
-            normalized_mode = self._normalize_connection_mode(mode)
-            db = get_db_profile(normalized_mode)
+            normalized_mode = "online"
+            db = get_db_profile("online")
             return {
                 "host": db.get("host", "localhost"),
                 "port": db.get("port", "5432"),
-                "name": db.get("name", "cost"),
-                "user": db.get("user", "postgres"),
+                "name": db.get("name", "cost_online_demo"),
+                "user": db.get("user", "cost_client_app"),
                 "password": db.get("password", ""),
                 "sslmode": self._resolve_sslmode(db.get("host", "localhost"), db.get("sslmode", "")),
                 "sslrootcert": db.get("sslrootcert", ""),
@@ -150,17 +150,17 @@ class BackendController(QObject):
                 "connection_confirmed": is_connection_confirmed(normalized_mode)
             }
         except Exception as e:
-            print(f"?????? ?????? ??????? ??????????? {mode}: {e}")
-            normalized_mode = self._normalize_connection_mode(mode)
+            print(f"Ошибка чтения параметров онлайн-подключения: {e}")
+            normalized_mode = "online"
             return {
                 "host": "localhost",
                 "port": "5432",
-                "name": "cost_online_demo" if normalized_mode == "online" else "cost",
-                "user": "cost_client_app" if normalized_mode == "online" else "postgres",
-                "password": "CostClientApp_2026!" if normalized_mode == "online" else "",
-                "sslmode": "disable" if normalized_mode == "local" else "require",
+                "name": "cost_online_demo",
+                "user": "cost_client_app",
+                "password": "CostClientApp_2026!",
+                "sslmode": "require",
                 "sslrootcert": "",
-                "selected_mode": "local",
+                "selected_mode": "online",
                 "mode": normalized_mode,
                 "config_path": "config.ini",
                 "connection_confirmed": False
@@ -239,7 +239,7 @@ class BackendController(QObject):
             if "database_online" not in config:
                 config["database_online"] = {}
             config["database_online"]["password"] = password_value
-            if config.get("app", "selected_connection_mode", fallback="local").strip().lower() == "online":
+            if config.get("app", "selected_connection_mode", fallback="online").strip().lower() == "online":
                 if "database" not in config:
                     config["database"] = {}
                 config["database"]["password"] = password_value
@@ -260,25 +260,25 @@ class BackendController(QObject):
             from backend.db.config import get_selected_connection_mode
             return get_selected_connection_mode()
         except Exception:
-            return "local"
+            return "online"
 
     @Slot(str, result="QVariantMap")
     def activateDatabaseMode(self, mode):
         try:
             from backend.db.config import set_selected_connection_mode
 
-            normalized_mode = self._normalize_connection_mode(mode)
-            path = set_selected_connection_mode(normalized_mode)
-            result = self.getDatabaseConfigForMode(normalized_mode)
+            normalized_mode = "online"
+            path = set_selected_connection_mode("online")
+            result = self.getDatabaseConfigForMode("online")
             result["ok"] = True
-            result["message"] = f"????? ??????????? ??????: {normalized_mode}"
+            result["message"] = "Активирован режим онлайн-подключения."
             result["config_path"] = str(path)
             return result
         except Exception as e:
             return {
                 "ok": False,
-                "message": f"?????? ?????? ?????? ???????????: {e}",
-                "mode": self._normalize_connection_mode(mode)
+                "message": f"Ошибка активации онлайн-подключения: {e}",
+                "mode": "online"
             }
 
     @Slot(str, str, str, str, str, result="QVariantMap")
@@ -288,8 +288,8 @@ class BackendController(QObject):
             conn = psycopg2.connect(
                 host=(host or 'localhost').strip(),
                 port=int(port or 5432),
-                dbname=(name or 'cost').strip(),
-                user=(user or 'postgres').strip(),
+                dbname=(name or 'cost_online_demo').strip(),
+                user=(user or 'cost_client_app').strip(),
                 password=password or '',
                 connect_timeout=3,
                 options='-c client_encoding=utf8',
@@ -319,7 +319,7 @@ class BackendController(QObject):
     @Slot(str, str, str, str, str, str, result="QVariantMap")
     def saveDatabaseConfigForMode(self, mode, host, port, name, user, password):
         try:
-            normalized_mode = self._normalize_connection_mode(mode)
+            normalized_mode = "online"
             test = self.testDatabaseConfig(host, port, name, user, password)
             if not test.get("ok"):
                 return test
@@ -327,15 +327,513 @@ class BackendController(QObject):
             path = save_db_config(host, port, name, user, password, confirmed=True, mode=normalized_mode)
             return {
                 "ok": True,
-                "message": f"??????? {normalized_mode} ????????: {path}",
+                "message": f"Параметры онлайн-подключения сохранены: {path}",
                 "mode": normalized_mode
             }
         except Exception as e:
             return {
                 "ok": False,
-                "message": f"?????? ?????????? ??????? ???????????: {e}",
-                "mode": self._normalize_connection_mode(mode)
+                "message": f"Ошибка сохранения онлайн-подключения: {e}",
+                "mode": "online"
             }
+
+    @Slot(result="QVariantMap")
+    def runFifoAutotest(self):
+        from backend.models.production import _consume_material_fifo
+
+        conn = None
+        try:
+            case = self._build_random_fifo_case()
+            conn = get_connection()
+            conn.autocommit = False
+            with conn.cursor() as cur:
+                material_name = f"FIFO_AUTOTEST_{date.today().isoformat()}_{random.randint(1000, 9999)}"
+
+                cur.execute(
+                    """
+                    INSERT INTO materials (
+                        name, unit, source, notes, updated_date,
+                        low_stock_threshold, enough_stock_threshold, category
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING id
+                    """,
+                    (
+                        material_name,
+                        "шт",
+                        "Автотест",
+                        "Временный материал для проверки FIFO",
+                        date.today(),
+                        1,
+                        3,
+                        "Материалы",
+                    ),
+                )
+                material_id = cur.fetchone()[0]
+
+                cur.execute(
+                    "INSERT INTO material_inventory (material_id, quantity) VALUES (%s, %s)",
+                    (material_id, sum((lot[2] for lot in case["lots"]), Decimal("0"))),
+                )
+
+                lot_ids = []
+                for purchase_date, price, qty in case["lots"]:
+                    cur.execute(
+                        """
+                        INSERT INTO purchases (
+                            material_id, price_per_unit, quantity, remaining_quantity, purchase_date, notes
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                        RETURNING id
+                        """,
+                        (
+                            material_id,
+                            price,
+                            qty,
+                            qty,
+                            purchase_date,
+                            "FIFO autotest lot",
+                        ),
+                    )
+                    lot_ids.append(cur.fetchone()[0])
+
+                consumed_cost = _consume_material_fifo(cur, material_id, case["consume_qty"])
+
+                cur.execute(
+                    """
+                    SELECT id, COALESCE(remaining_quantity, 0)
+                    FROM purchases
+                    WHERE id = ANY(%s)
+                    ORDER BY purchase_date ASC, id ASC
+                    """,
+                    (lot_ids,),
+                )
+                remaining_rows = cur.fetchall()
+                remaining_values = [Decimal(str(row[1] or 0)) for row in remaining_rows]
+                expected_remaining = case["expected_remaining"]
+                expected_cost = case["expected_cost"]
+
+                ok = remaining_values == expected_remaining and Decimal(str(consumed_cost)).quantize(Decimal("0.01")) == expected_cost
+                details = (
+                    f"{case['formula_text']}. "
+                    f"Ожидалось: остатки {expected_remaining}, стоимость {expected_cost}. "
+                    f"Получено: остатки {remaining_values}, стоимость {Decimal(str(consumed_cost)).quantize(Decimal('0.01'))}."
+                )
+
+                conn.rollback()
+
+                return {
+                    "ok": ok,
+                    "name": "FIFO",
+                    "indicator": "green" if ok else "red",
+                    "message": "FIFO работает корректно." if ok else "FIFO работает некорректно.",
+                    "details": details,
+                }
+        except Exception as e:
+            if conn is not None:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+            return {
+                "ok": False,
+                "name": "FIFO",
+                "indicator": "red",
+                "message": "Ошибка выполнения автотеста FIFO.",
+                    "details": str(e),
+            }
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+
+    def _make_autotest_result(self, name, ok, message, details=""):
+        return {
+            "name": name,
+            "ok": bool(ok),
+            "indicator": "green" if ok else "red",
+            "message": message,
+            "details": details or "",
+        }
+
+    def _random_int_pair(self, left_min=1, left_max=500, right_min=1, right_max=500):
+        left = random.randint(left_min, left_max)
+        right = random.randint(right_min, right_max)
+        return left, right, left + right
+
+    def _build_random_fifo_case(self):
+        lot_qtys = [random.randint(2, 7), random.randint(2, 7), random.randint(2, 7)]
+        lot_prices = [Decimal(str(random.randint(1, 9))), Decimal(str(random.randint(10, 30))), Decimal(str(random.randint(31, 60)))]
+        consume_qty = random.randint(1, sum(lot_qtys) - 1)
+        remaining = consume_qty
+        expected_cost = Decimal("0.00")
+        expected_remaining = []
+        for qty, price in zip(lot_qtys, lot_prices):
+            take = min(qty, remaining)
+            expected_cost += Decimal(str(take)) * price
+            expected_remaining.append(Decimal(str(qty - take)))
+            remaining -= take
+        lots = [
+            (date.today() - timedelta(days=3), lot_prices[0], Decimal(str(lot_qtys[0]))),
+            (date.today() - timedelta(days=2), lot_prices[1], Decimal(str(lot_qtys[1]))),
+            (date.today() - timedelta(days=1), lot_prices[2], Decimal(str(lot_qtys[2]))),
+        ]
+        return {
+            "lots": lots,
+            "consume_qty": Decimal(str(consume_qty)),
+            "expected_cost": expected_cost.quantize(Decimal("0.01")),
+            "expected_remaining": expected_remaining,
+            "formula_text": (
+                f"Партии: {lot_qtys[0]}x{lot_prices[0]} + "
+                f"{lot_qtys[1]}x{lot_prices[1]} + {lot_qtys[2]}x{lot_prices[2]}, "
+                f"списание {consume_qty}"
+            ),
+        }
+
+    def _build_random_indirect_case(self):
+        monthly_amount = Decimal(str(random.randint(100, 900)))
+        days_in_month = random.randint(28, 31)
+        machine_count = random.randint(1, 12)
+        day_rate = (monthly_amount / Decimal(str(days_in_month))).quantize(Decimal("0.0001"))
+        per_machine = (day_rate / Decimal(str(machine_count))).quantize(Decimal("0.0001"))
+        return {
+            "monthly_amount": monthly_amount,
+            "days_in_month": days_in_month,
+            "machine_count": machine_count,
+            "day_rate": day_rate,
+            "per_machine": per_machine,
+        }
+
+    def _build_random_report_case(self):
+        revenue = Decimal(str(random.randint(200, 2000)))
+        cogs = Decimal(str(random.randint(50, int(revenue) - 30)))
+        salary = Decimal(str(random.randint(10, 200)))
+        tools = Decimal(str(random.randint(5, 120)))
+        gross_profit = revenue - cogs
+        net_profit = gross_profit - salary - tools
+        return {
+            "revenue": revenue,
+            "cogs": cogs,
+            "salary": salary,
+            "tools": tools,
+            "gross_profit": gross_profit,
+            "net_profit": net_profit,
+        }
+
+    def _run_cost_autotest(self):
+        conn = None
+        suffix = f"{date.today().isoformat()}_{random.randint(1000, 9999)}"
+        material_name = f"COST_AUTOTEST_{suffix}"
+        machine_model = f"COST_MACHINE_{suffix}"
+        try:
+            case = self._build_random_fifo_case()
+            conn = get_connection()
+            conn.autocommit = False
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO materials (
+                        name, unit, source, notes, updated_date,
+                        low_stock_threshold, enough_stock_threshold, category
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING id
+                    """,
+                    (
+                        material_name,
+                        "шт",
+                        "Автотест",
+                        "Временный материал для проверки себестоимости",
+                        date.today(),
+                        1,
+                        3,
+                        "Материалы",
+                    ),
+                )
+                material_id = cur.fetchone()[0]
+                cur.execute(
+                    "INSERT INTO material_inventory (material_id, quantity) VALUES (%s, %s)",
+                    (material_id, sum((lot[2] for lot in case["lots"]), Decimal("0"))),
+                )
+                for purchase_date, price, qty in case["lots"]:
+                    cur.execute(
+                        """
+                        INSERT INTO purchases (
+                            material_id, price_per_unit, quantity, remaining_quantity, purchase_date, notes
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                        """,
+                        (material_id, price, qty, qty, purchase_date, "Cost autotest lot"),
+                    )
+
+                cur.execute(
+                    "INSERT INTO machines (model, total_cost) VALUES (%s, %s) RETURNING id",
+                    (machine_model, Decimal("0")),
+                )
+                machine_id = cur.fetchone()[0]
+                cur.execute(
+                    "INSERT INTO machine_materials (machine_id, material_id, quantity) VALUES (%s, %s, %s)",
+                    (machine_id, material_id, case["consume_qty"]),
+                )
+                conn.commit()
+
+            calculated = calculate_machine_cost_from_purchases(machine_id)
+            expected = case["expected_cost"]
+            ok = Decimal(str(calculated)).quantize(Decimal("0.01")) == expected
+            details = (
+                f"{case['formula_text']}. "
+                f"Ожидалось {expected:.2f} руб., получено {Decimal(str(calculated)).quantize(Decimal('0.01')):.2f} руб."
+            )
+            return self._make_autotest_result(
+                "Себестоимость",
+                ok,
+                "Себестоимость считается корректно." if ok else "Ошибка расчёта себестоимости.",
+                details,
+            )
+        except Exception as e:
+            return self._make_autotest_result("Себестоимость", False, "Ошибка автотеста себестоимости.", str(e))
+        finally:
+            if conn is not None:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+            try:
+                with get_connection() as cleanup_conn:
+                    with cleanup_conn.cursor() as cleanup_cur:
+                        cleanup_cur.execute("DELETE FROM machine_materials WHERE machine_id IN (SELECT id FROM machines WHERE model = %s)", (machine_model,))
+                        cleanup_cur.execute("DELETE FROM machines WHERE model = %s", (machine_model,))
+                        cleanup_cur.execute("DELETE FROM purchases WHERE material_id IN (SELECT id FROM materials WHERE name = %s)", (material_name,))
+                        cleanup_cur.execute("DELETE FROM material_inventory WHERE material_id IN (SELECT id FROM materials WHERE name = %s)", (material_name,))
+                        cleanup_cur.execute("DELETE FROM materials WHERE name = %s", (material_name,))
+                    cleanup_conn.commit()
+            except Exception:
+                pass
+
+    def _run_inventory_autotest(self):
+        try:
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT m.id, m.name,
+                               COALESCE(inv.quantity, 0) AS inventory_qty,
+                               COALESCE(SUM(COALESCE(p.remaining_quantity, 0)), 0) AS purchase_qty
+                        FROM materials m
+                        LEFT JOIN material_inventory inv ON inv.material_id = m.id
+                        LEFT JOIN purchases p ON p.material_id = m.id
+                        GROUP BY m.id, m.name, inv.quantity
+                        HAVING ABS(COALESCE(inv.quantity, 0) - COALESCE(SUM(COALESCE(p.remaining_quantity, 0)), 0)) > 0.0001
+                        ORDER BY m.id
+                        LIMIT 10
+                        """
+                    )
+                    mismatches = cur.fetchall()
+            ok = len(mismatches) == 0
+            details = "Остатки в material_inventory совпадают с суммой remaining_quantity по всем партиям."
+            if mismatches:
+                parts = []
+                for material_id, name, inv_qty, pur_qty in mismatches:
+                    parts.append(f"ID {material_id} {name}: склад={inv_qty}, партии={pur_qty}")
+                details = "; ".join(parts)
+            return self._make_autotest_result(
+                "Остатки склада",
+                ok,
+                "Остатки склада согласованы." if ok else "Найдены расхождения остатков склада.",
+                details,
+            )
+        except Exception as e:
+            return self._make_autotest_result("Остатки склада", False, "Ошибка проверки остатков склада.", str(e))
+
+    def _run_transactions_autotest(self):
+        conn = None
+        try:
+            conn = get_connection()
+            conn.autocommit = False
+            with conn.cursor() as cur:
+                marker = f"TX_AUTOTEST_{date.today().isoformat()}"
+                cur.execute(
+                    """
+                    INSERT INTO materials (
+                        name, unit, source, notes, updated_date,
+                        low_stock_threshold, enough_stock_threshold, category
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING id
+                    """,
+                    (marker, "шт", "Автотест", "Проверка rollback", date.today(), 1, 3, "Материалы"),
+                )
+                material_id = cur.fetchone()[0]
+                cur.execute("INSERT INTO material_inventory (material_id, quantity) VALUES (%s, %s)", (material_id, Decimal("5")))
+                cur.execute(
+                    """
+                    INSERT INTO material_transactions (material_id, quantity_change, transaction_type, reference_id)
+                    VALUES (%s, %s, %s, %s)
+                    """,
+                    (material_id, Decimal("5"), "autotest", None),
+                )
+                conn.rollback()
+                cur.execute("SELECT COUNT(*) FROM materials WHERE name = %s", (marker,))
+                material_count = cur.fetchone()[0]
+                cur.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM material_transactions mt
+                    JOIN materials m ON m.id = mt.material_id
+                    WHERE m.name = %s
+                    """,
+                    (marker,),
+                )
+                tx_count = cur.fetchone()[0]
+            ok = material_count == 0 and tx_count == 0
+            details = f"После rollback: материалов={material_count}, транзакций={tx_count}."
+            return self._make_autotest_result(
+                "Транзакции",
+                ok,
+                "Rollback транзакций работает корректно." if ok else "Rollback транзакций работает некорректно.",
+                details,
+            )
+        except Exception as e:
+            return self._make_autotest_result("Транзакции", False, "Ошибка автотеста транзакций.", str(e))
+        finally:
+            if conn is not None:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+
+    def _run_indirect_autotest(self):
+        try:
+            self._ensure_indirect_schema()
+            formula_case = self._build_random_indirect_case()
+            expected_day_rate = (formula_case["monthly_amount"] / Decimal(str(formula_case["days_in_month"]))).quantize(Decimal("0.0001"))
+            expected_per_machine = (expected_day_rate / Decimal(str(formula_case["machine_count"]))).quantize(Decimal("0.0001"))
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT COUNT(*)
+                        FROM (
+                            SELECT fg.id
+                            FROM finished_goods fg
+                            LEFT JOIN (
+                                SELECT finished_good_id, COALESCE(SUM(amount), 0)::DECIMAL(12, 2) AS allocated
+                                FROM indirect_cost_allocations
+                                GROUP BY finished_good_id
+                            ) a ON a.finished_good_id = fg.id
+                            WHERE ABS(COALESCE(fg.indirect_cost, 0) - COALESCE(a.allocated, 0)) > 0.01
+                        ) t
+                        """
+                    )
+                    mismatch_count = cur.fetchone()[0]
+                    cur.execute("SELECT COUNT(*) FROM indirect_expense_categories")
+                    categories_count = cur.fetchone()[0]
+            ok = (
+                mismatch_count == 0
+                and formula_case["day_rate"] == expected_day_rate
+                and formula_case["per_machine"] == expected_per_machine
+            )
+            details = (
+                f"Формула: {formula_case['monthly_amount']} / {formula_case['days_in_month']} = {expected_day_rate}; "
+                f"{expected_day_rate} / {formula_case['machine_count']} = {expected_per_machine}. "
+                f"Категорий: {categories_count}. Расхождений между indirect_cost и allocations: {mismatch_count}."
+            )
+            return self._make_autotest_result(
+                "Косвенные расходы",
+                ok,
+                "Косвенные расходы согласованы." if ok else "Найдены расхождения по косвенным расходам.",
+                details,
+            )
+        except Exception as e:
+            return self._make_autotest_result("Косвенные расходы", False, "Ошибка автотеста косвенных расходов.", str(e))
+
+    def _run_reports_autotest(self):
+        try:
+            start = date.today().replace(day=1).isoformat()
+            end = date.today().isoformat()
+            pnl_text = self.getProfitLossReport(start, end)
+            tax_report = self.calculateTaxReport(start, end, 6.0)
+            formula_case = self._build_random_report_case()
+            left, right, expected_sum = self._random_int_pair()
+            expected_gross = formula_case["revenue"] - formula_case["cogs"]
+            expected_net = expected_gross - formula_case["salary"] - formula_case["tools"]
+            ok = (
+                bool(pnl_text)
+                and "Ошибка" not in pnl_text
+                and isinstance(tax_report, dict)
+                and "tax" in tax_report
+                and expected_gross == formula_case["gross_profit"]
+                and expected_net == formula_case["net_profit"]
+                and (left + right) == expected_sum
+            )
+            details = (
+                f"Контрольная формула: {left} + {right} = {expected_sum}. "
+                f"Формула отчёта: {formula_case['revenue']} - {formula_case['cogs']} = {expected_gross}; "
+                f"{expected_gross} - {formula_case['salary']} - {formula_case['tools']} = {expected_net}. "
+                f"Отчёт P&L: {len(pnl_text or '')} символов. Налоговый отчёт: база={tax_report.get('base', 0)}, налог={tax_report.get('tax', 0)}."
+            )
+            return self._make_autotest_result(
+                "Отчёты",
+                ok,
+                "Отчёты формируются корректно." if ok else "Ошибка формирования отчётов.",
+                details,
+            )
+        except Exception as e:
+            return self._make_autotest_result("Отчёты", False, "Ошибка автотеста отчётов.", str(e))
+
+    def _run_export_autotest(self):
+        try:
+            excel_result = self.exportFullDatabaseToExcel()
+            dump_result = self.exportDatabaseDump()
+            excel_ok = bool(excel_result.get("ok")) and Path(excel_result.get("path", "")).exists()
+            dump_ok = bool(dump_result.get("ok")) and Path(dump_result.get("path", "")).exists()
+            ok = excel_ok and dump_ok
+            details = (
+                f"Excel: {'OK' if excel_ok else excel_result.get('message', 'ошибка')}. "
+                f"Dump: {'OK' if dump_ok else dump_result.get('message', 'ошибка')}."
+            )
+            if excel_ok:
+                try:
+                    Path(excel_result.get("path", "")).unlink(missing_ok=True)
+                except Exception:
+                    pass
+            if dump_ok:
+                try:
+                    Path(dump_result.get("path", "")).unlink(missing_ok=True)
+                except Exception:
+                    pass
+            return self._make_autotest_result(
+                "Экспорт",
+                ok,
+                "Экспорт работает корректно." if ok else "Ошибка одного или нескольких экспортов.",
+                details,
+            )
+        except Exception as e:
+            return self._make_autotest_result("Экспорт", False, "Ошибка автотеста экспорта.", str(e))
+
+    @Slot(result="QVariantList")
+    def runAllAutotests(self):
+        fifo_result = self.runFifoAutotest()
+        results = [
+            fifo_result,
+            self._run_cost_autotest(),
+            self._run_inventory_autotest(),
+            self._run_transactions_autotest(),
+            self._run_indirect_autotest(),
+            self._run_reports_autotest(),
+            self._run_export_autotest(),
+        ]
+        return results
 
     def _get_export_dir(self):
         export_dir = Path.cwd() / "exports"

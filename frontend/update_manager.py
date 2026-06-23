@@ -15,7 +15,9 @@ from version import (
     APP_EXE_NAME,
     APP_NAME,
     APP_VERSION,
+    GITHUB_OWNER,
     GITHUB_LATEST_RELEASE_API,
+    GITHUB_REPO,
     STABLE_ZIP_ASSET_NAME,
     UPDATE_MANIFEST_URL,
     UPDATER_EXE_NAME,
@@ -23,6 +25,11 @@ from version import (
 
 
 class UpdateManager(QObject):
+    REQUEST_HEADERS = {
+        "User-Agent": f"{APP_NAME}/{APP_VERSION} (+https://github.com/{GITHUB_OWNER}/{GITHUB_REPO})",
+        "Accept": "application/json, */*",
+    }
+
     busyChanged = Signal()
     statusMessageChanged = Signal()
     progressChanged = Signal()
@@ -169,18 +176,7 @@ class UpdateManager(QObject):
 
             self._set_status("\u0417\u0430\u0433\u0440\u0443\u0437\u043a\u0430 \u043e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u0438\u044f...")
             self._set_progress(0.0)
-            with requests.get(download_url, stream=True, timeout=60) as response:
-                response.raise_for_status()
-                total_size = int(response.headers.get("content-length") or 0)
-                downloaded = 0
-                with zip_path.open("wb") as fh:
-                    for chunk in response.iter_content(chunk_size=1024 * 256):
-                        if not chunk:
-                            continue
-                        fh.write(chunk)
-                        downloaded += len(chunk)
-                        if total_size > 0:
-                            self._set_progress(round(downloaded * 100.0 / total_size, 1))
+            self._download_with_retries(download_url, zip_path)
 
             if self._sha256:
                 file_hash = hashlib.sha256(zip_path.read_bytes()).hexdigest().lower()
@@ -208,11 +204,50 @@ class UpdateManager(QObject):
         finally:
             self._set_busy(False)
 
+    def _download_with_retries(self, download_url: str, zip_path: Path, attempts: int = 3):
+        last_error = None
+        for attempt in range(1, attempts + 1):
+            try:
+                if zip_path.exists():
+                    zip_path.unlink()
+                with requests.get(
+                    download_url,
+                    stream=True,
+                    timeout=(20, 300),
+                    headers=self.REQUEST_HEADERS,
+                ) as response:
+                    response.raise_for_status()
+                    total_size = int(response.headers.get("content-length") or 0)
+                    downloaded = 0
+                    with zip_path.open("wb") as fh:
+                        for chunk in response.iter_content(chunk_size=1024 * 256):
+                            if not chunk:
+                                continue
+                            fh.write(chunk)
+                            downloaded += len(chunk)
+                            if total_size > 0:
+                                self._set_progress(round(downloaded * 100.0 / total_size, 1))
+                return
+            except Exception as e:
+                last_error = e
+                if zip_path.exists():
+                    try:
+                        zip_path.unlink()
+                    except OSError:
+                        pass
+                if attempt < attempts:
+                    self._set_status(
+                        f"\u0417\u0430\u0433\u0440\u0443\u0437\u043a\u0430 \u043e\u0431\u043e\u0440\u0432\u0430\u043b\u0430\u0441\u044c, \u043f\u043e\u0432\u0442\u043e\u0440 {attempt}/{attempts - 1}..."
+                    )
+                else:
+                    break
+        raise RuntimeError(last_error or "\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u0437\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u044c \u043e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u0438\u0435.")
+
     def _fetch_release_metadata(self):
         last_error = None
         for url in (UPDATE_MANIFEST_URL, GITHUB_LATEST_RELEASE_API):
             try:
-                response = requests.get(url, timeout=20)
+                response = requests.get(url, timeout=(10, 30), headers=self.REQUEST_HEADERS)
                 response.raise_for_status()
                 payload = response.json()
                 if url == GITHUB_LATEST_RELEASE_API:

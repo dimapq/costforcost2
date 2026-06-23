@@ -4,10 +4,9 @@ import ipaddress
 from pathlib import Path
 
 PROFILE_SECTION_BY_MODE = {
-    "local": "database_local",
     "online": "database_online",
 }
-DEFAULT_MODE = "local"
+DEFAULT_MODE = "online"
 ACTIVE_SECTION = "database"
 APP_SECTION = "app"
 DEFAULT_ONLINE_NAME = "cost_online_demo"
@@ -29,8 +28,7 @@ def _default_sslmode_for_host(host):
 
 
 def _normalize_mode(mode):
-    value = str(mode or DEFAULT_MODE).strip().lower()
-    return value if value in PROFILE_SECTION_BY_MODE else DEFAULT_MODE
+    return DEFAULT_MODE
 
 
 def _section_for_mode(mode):
@@ -39,16 +37,10 @@ def _section_for_mode(mode):
 
 def _default_profile(mode):
     normalized = _normalize_mode(mode)
-    if normalized == "online":
-        host = "localhost"
-        name = DEFAULT_ONLINE_NAME
-        user = DEFAULT_ONLINE_USER
-        password = DEFAULT_ONLINE_PASSWORD
-    else:
-        host = "localhost"
-        name = "cost"
-        user = "postgres"
-        password = "dbcost1"
+    host = "localhost"
+    name = DEFAULT_ONLINE_NAME
+    user = DEFAULT_ONLINE_USER
+    password = DEFAULT_ONLINE_PASSWORD
     return {
         "host": host,
         "port": "5432",
@@ -78,9 +70,6 @@ def _ensure_config_shape(config):
         if section_name not in config:
             config[section_name] = {}
         defaults = _default_profile(mode)
-        if not config[section_name] and mode == "local" and config[ACTIVE_SECTION]:
-            for key, value in config[ACTIVE_SECTION].items():
-                config[section_name][key] = str(value)
         for key, value in defaults.items():
             if key not in config[section_name] or config[section_name].get(key, "") == "":
                 config[section_name][key] = str(value)
@@ -95,9 +84,10 @@ def _ensure_config_shape(config):
     for mode in PROFILE_SECTION_BY_MODE:
         key = f"connection_confirmed_{mode}"
         if key not in app:
-            app[key] = app.get("connection_confirmed", "false") if mode == DEFAULT_MODE else "false"
+            app[key] = app.get("connection_confirmed", "false")
 
-    selected_mode = _normalize_mode(app.get("selected_connection_mode", DEFAULT_MODE))
+    app["selected_connection_mode"] = DEFAULT_MODE
+    selected_mode = DEFAULT_MODE
     _copy_section(config, _section_for_mode(selected_mode), ACTIVE_SECTION)
 
 
@@ -116,12 +106,10 @@ def create_default_config(path=None):
     config_path = Path(path) if path else get_config_path()
     config = configparser.ConfigParser()
     config[ACTIVE_SECTION] = dict(_default_profile(DEFAULT_MODE))
-    config[_section_for_mode("local")] = dict(_default_profile("local"))
     config[_section_for_mode("online")] = dict(_default_profile("online"))
     config[APP_SECTION] = {
         "selected_connection_mode": DEFAULT_MODE,
         "connection_confirmed": "false",
-        "connection_confirmed_local": "false",
         "connection_confirmed_online": "false",
     }
     with open(config_path, "w", encoding="utf-8") as file:
