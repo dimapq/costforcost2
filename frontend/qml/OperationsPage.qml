@@ -178,7 +178,7 @@ Page {
 
                     ColumnLayout {
                         anchors.centerIn: parent
-                        Label { text: "Tools"; font.bold: true }
+                        Label { text: "Инструменты"; font.bold: true }
                         Label {
                             id: toolsValue
                             text: backend.getToolsSummary() || "0.00"

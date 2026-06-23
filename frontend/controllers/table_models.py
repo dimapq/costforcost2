@@ -8,6 +8,8 @@ class MaterialTableModel(QAbstractTableModel):
         super().__init__()
         self._data = []
         self._category_filter = ""
+        self._sort_column = 1
+        self._sort_ascending = True
         self._extra_headers = ["Используется в", "Откуда взят", "Примечание", "Дата обновления"]
         self._headers = ["ID", "Название", "Категория", "Остаток", "Цена за ед.", "Сумма"]
 
@@ -63,6 +65,61 @@ class MaterialTableModel(QAbstractTableModel):
         if 0 <= row < len(self._data):
             return self._data[row]
         return {}
+
+    @Slot(int, result=str)
+    def getHeader(self, section):
+        value = self.headerData(section, Qt.Horizontal, Qt.DisplayRole)
+        return "" if value is None else str(value)
+
+    @Slot(result=int)
+    def getSortColumn(self):
+        return self._sort_column
+
+    @Slot(result=bool)
+    def getSortAscending(self):
+        return self._sort_ascending
+
+    def _sort_value(self, row, column):
+        if column == 0:
+            return int(row.get('id') or 0)
+        if column == 1:
+            return (row.get('name') or "").lower()
+        if column == 2:
+            return (row.get('category') or "").lower()
+        if column == 3:
+            return float(row.get('quantity') or 0)
+        if column == 4:
+            return float(row.get('price') or 0)
+        if column == 5:
+            return float(row.get('total') or 0)
+        if column == 6:
+            return (row.get('used_in') or "").lower()
+        if column == 7:
+            return (row.get('source') or "").lower()
+        if column == 8:
+            return (row.get('notes') or "").lower()
+        if column == 9:
+            return row.get('updated_date') or ""
+        return ""
+
+    def _apply_sort(self):
+        self._data.sort(
+            key=lambda row: self._sort_value(row, self._sort_column),
+            reverse=not self._sort_ascending
+        )
+
+    @Slot(int)
+    def sortByColumn(self, column):
+        if column < 0 or column >= self.columnCount():
+            return
+        self.beginResetModel()
+        if self._sort_column == column:
+            self._sort_ascending = not self._sort_ascending
+        else:
+            self._sort_column = column
+            self._sort_ascending = True
+        self._apply_sort()
+        self.endResetModel()
 
     def _stock_state(self, quantity, enough_threshold):
         qty = float(quantity or 0)
@@ -190,6 +247,7 @@ class MaterialTableModel(QAbstractTableModel):
                 if self._category_filter:
                     data = [row for row in data if (row.get('category') or '') == self._category_filter]
                 self._data = data
+                self._apply_sort()
         self.endResetModel()
 
 class ToolsTableModel(QAbstractTableModel):

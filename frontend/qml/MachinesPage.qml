@@ -171,7 +171,7 @@ Page {
                                 onClicked: cancelProductionDialog.open()
                             }
                             Button {
-                                text: "Excel: выбранный"
+                                text: "Excel: для выбранного"
                                 enabled: tab1Root.selectedInProgressId > 0
                                 onClicked: {
                                     var path = backend.exportMissingMaterialsForMachine(tab1Root.selectedInProgressId)
@@ -179,7 +179,7 @@ Page {
                                 }
                             }
                             Button {
-                                text: "Excel: все"
+                                text: "Excel: для всех"
                                 onClicked: {
                                     var path = backend.exportMissingMaterialsForAllInProgress()
                                     tab1Root.exportMessage = path ? "Файл создан: " + path : "Нет материалов для покупки или ошибка выгрузки"
@@ -708,7 +708,7 @@ Page {
                             spacing: 5
                             
                             Button {
-                                text: "Sell"
+                                text: "Продать"
                                 enabled: tab2Root.selectedFinishedId > 0
                                 highlighted: tab2Root.selectedFinishedId > 0
                                 onClicked: sellDialog.open()
@@ -1004,9 +1004,9 @@ Page {
                             TextField { id: soldEditBuyerField; Layout.fillWidth: true }
                             Label { text: "Дата продажи (ГГГГ-ММ-ДД):" }
                             TextField { id: soldEditSaleDateField; Layout.fillWidth: true }
-                            Label { text: "Production end date (YYYY-MM-DD):" }
+                            Label { text: "Дата окончания производства (ГГГГ-ММ-ДД):" }
                             TextField { id: soldEditProducedDateField; Layout.fillWidth: true }
-                            Label { text: "Indirect expenses:" }
+                            Label { text: "Косвенные расходы:" }
                             TextField { id: soldEditIndirectField; Layout.fillWidth: true; validator: DoubleValidator { bottom: 0 } }
                         }
 
@@ -1088,7 +1088,7 @@ Page {
                     // ========== Р вЂќР ВР С’Р вЂєР С›Р вЂњР В ==========
             Dialog {
                 id: sellDialog
-                title: "Sell machine"
+                title: "Продать станок"
                 standardButtons: Dialog.Ok | Dialog.Cancel
                 width: 550
                 height: 520
@@ -1103,14 +1103,14 @@ Page {
                     TextField {
                         id: sellInvNumberField
                         Layout.fillWidth: true
-                        placeholderText: "Enter inventory number or leave empty"
+                        placeholderText: "Введите инвентарный номер или оставьте пустым"
                     }
 
                     Label { text: "Дата продажи:" }
                     TextField {
                         id: sellDateField
                         Layout.fillWidth: true
-                        placeholderText: "YYYY-MM-DD (Enter = today)"
+                        placeholderText: "ГГГГ-ММ-ДД (пусто = сегодня)"
                         text: Qt.formatDate(new Date(), "yyyy-MM-dd")
                     }
 
@@ -1126,13 +1126,13 @@ Page {
                         id: sellPriceField
                         Layout.fillWidth: true
                         validator: DoubleValidator { bottom: 0.01 }
-                        placeholderText: "Enter sale price"
+                        placeholderText: "Введите цену продажи"
                     }
 
                     // Р вЂР вЂєР С›Р С™ Р СћР В Р С’Р СњР РЋР СџР С›Р В Р СћР ВР В Р С›Р вЂ™Р С™Р В
                     GroupBox {
                         Layout.fillWidth: true
-                        title: "Shipping"
+                        title: "Доставка"
 
                         ColumnLayout {
                             anchors.fill: parent
@@ -1157,7 +1157,7 @@ Page {
                                 visible: shippingPaidRadio.checked
                                 Layout.fillWidth: true
                                 
-                                Label { text: "Shipping cost (rub.):" }
+                                Label { text: "Стоимость доставки (руб.):" }
                                 TextField {
                                     id: shippingCostField
                                     Layout.fillWidth: true
@@ -1182,7 +1182,7 @@ Page {
                         id: sellErrorLabel
                         color: "red"
                         visible: false
-                        text: "Enter sale price and buyer."
+                        text: "Введите цену продажи и покупателя."
                     }
                 }
 
@@ -1290,7 +1290,7 @@ Page {
                     }
 
                     Label {
-                        text: "What will happen:"
+                        text: "Что произойдёт:"
                         font.bold: true
                     }
 
@@ -1357,13 +1357,13 @@ Page {
                     Label { text: "Дата начала производства (ГГГГ-ММ-ДД):" }
                     TextField { id: editFinishedStartDateField; Layout.fillWidth: true; placeholderText: "2026-04-01" }
 
-                    Label { text: "Production end date (YYYY-MM-DD):" }
+                    Label { text: "Дата окончания производства (ГГГГ-ММ-ДД):" }
                     TextField { id: editFinishedDateField; Layout.fillWidth: true; placeholderText: "2026-04-28" }
 
-                    Label { text: "Cost price:" }
+                    Label { text: "Себестоимость:" }
                     TextField { id: editFinishedCostField; Layout.fillWidth: true; validator: DoubleValidator { bottom: 0 } }
 
-                    Label { text: "Indirect expenses:" }
+                    Label { text: "Косвенные расходы:" }
                     TextField { id: editFinishedIndirectField; Layout.fillWidth: true; validator: DoubleValidator { bottom: 0 } }
 
                     Label { text: "Примечание:" }
@@ -1413,17 +1413,17 @@ Page {
                     }
 
                     Label {
-                        text: "This machine will be removed from the database.\n" +
+                        text: "Этот станок будет удалён из базы данных.\n" +
                             "Материалы не будут возвращены на склад.\n" +
-                            "Production history will be deleted\n" +
-                                "This action cannot be undone"
+                            "История производства будет удалена.\n" +
+                                "Это действие нельзя отменить."
                         wrapMode: Text.WordWrap
                         Layout.fillWidth: true
                     }
 
 
                     Label {
-                        text: "If you want to keep the materials, use disassemble instead of delete."
+                        text: "Если нужно сохранить материалы, используйте разборку вместо удаления."
                         color: "#d9534f"
                         font.bold: true
                         wrapMode: Text.WordWrap

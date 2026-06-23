@@ -30,35 +30,35 @@ ApplicationWindow {
     property color fifoAutotestColor: "#bcbcbc"
     property var backendObj: (typeof backend !== "undefined") ? backend : null
     property var updateManagerObj: (typeof updateManager !== "undefined") ? updateManager : null
-    property string userManualText: "User Manual\n\n"
-        + "1. General workflow\n"
-        + "The app tracks materials, machines, employees, operations, and finances. Typical workflow: fill the warehouse, configure machine models, start production, add labor and expenses, finish production, and review finance results.\n\n"
-        + "2. Operations tab\n"
-        + "Quick actions, work time entry, last operations log, and warehouse summary.\n\n"
-        + "3. Warehouse -> Materials\n"
-        + "Main material stock. You can add, edit, recount, and review where each material is used.\n\n"
-        + "4. Warehouse -> Composite materials\n"
-        + "Create recipes from several components and produce a composite material.\n\n"
-        + "5. Warehouse -> Plate cutting\n"
-        + "Manage plate materials, templates, drawings, process files, and produce parts from specific plates.\n\n"
-        + "6. Warehouse -> Tools\n"
-        + "Tool inventory, write-off, and depreciation.\n\n"
-        + "7. Employees\n"
-        + "Employees, rates, job history, salary, bonus, and settlements.\n\n"
-        + "8. Machines -> Model editor\n"
-        + "Configure bill of materials, norms, tools, and other parameters for each machine model.\n\n"
-        + "9. Machines -> In progress\n"
-        + "Reserve materials, add labor, monitor indirect expenses, cancel or finish production.\n\n"
-        + "10. Machines -> In stock\n"
-        + "Finished but unsold machines with cost details and production dates.\n\n"
-        + "11. Machines -> Sold\n"
-        + "Sold machines, sale date, customer, sale price, profit, and tax cost values.\n\n"
-        + "12. Finance\n"
-        + "Profit and loss, taxes, indirect expenses, and other expenses.\n\n"
-        + "13. Settings\n"
-        + "Database connection, full Excel export, SQL dump, update check, and this manual.\n\n"
-        + "14. Recommended start\n"
-        + "Check database connection first, then fill warehouse, employees, and machine models."
+    property string userManualText: "Руководство пользователя\n\n"
+        + "1. Общий порядок работы\n"
+        + "Приложение ведёт учёт материалов, станков, сотрудников, операций и финансов. Обычный сценарий: заполнить склад, настроить модели станков, запустить производство, добавить трудозатраты и расходы, завершить производство и проверить финансовый результат.\n\n"
+        + "2. Вкладка «Операции»\n"
+        + "Быстрые действия, учёт рабочего времени, журнал последних операций и сводка по складу.\n\n"
+        + "3. Склад -> Материалы\n"
+        + "Основной склад материалов. Здесь можно добавлять, редактировать, пересчитывать остатки и смотреть, где используется каждый материал.\n\n"
+        + "4. Склад -> Составные материалы\n"
+        + "Создание рецептов из нескольких компонентов и выпуск составного материала.\n\n"
+        + "5. Склад -> Раскрой плит\n"
+        + "Работа с плитными материалами, шаблонами, чертежами, файлами обработки и выпуском деталей из конкретных плит.\n\n"
+        + "6. Склад -> Инструменты\n"
+        + "Учёт инструмента, списание и амортизация.\n\n"
+        + "7. Сотрудники\n"
+        + "Сотрудники, ставки, история работ, зарплата, премии и взаиморасчёты.\n\n"
+        + "8. Станки -> Редактор моделей\n"
+        + "Настройка состава материалов, норм, инструмента и других параметров для каждой модели станка.\n\n"
+        + "9. Станки -> В процессе\n"
+        + "Резервирование материалов, добавление часов, контроль косвенных расходов, отмена или завершение производства.\n\n"
+        + "10. Станки -> На складе\n"
+        + "Готовые, но ещё не проданные станки с деталями себестоимости и датами производства.\n\n"
+        + "11. Станки -> Проданные\n"
+        + "Проданные станки, дата продажи, покупатель, цена продажи, прибыль и налоговая себестоимость.\n\n"
+        + "12. Финансы\n"
+        + "Прибыль и убытки, налоги, косвенные и прочие расходы.\n\n"
+        + "13. Настройки\n"
+        + "Подключение к базе, полный экспорт в Excel, SQL-дамп, проверка обновлений и это руководство.\n\n"
+        + "14. С чего начать\n"
+        + "Сначала проверьте подключение к базе, затем заполните склад, сотрудников и модели станков."
 
     header: ToolBar {
         RowLayout {
@@ -150,7 +150,7 @@ ApplicationWindow {
         MenuItem {
             text: "Дамп всей базы для экспорта"
             onTriggered: {
-                var result = backendObj ? backendObj.exportDatabaseDump() : {"message": "Backend недоступен", "path": ""}
+                var result = backendObj ? backendObj.exportDatabaseDump() : {"message": "Бэкенд недоступен", "path": ""}
                 root.settingsActionMessage = result.message || ""
                 root.settingsActionPath = result.path || ""
                 settingsResultDialog.open()
@@ -283,19 +283,19 @@ ApplicationWindow {
                 columnSpacing: 10
                 rowSpacing: 8
 
-                Label { text: "Host:" }
+                Label { text: "Хост:" }
                 TextField { id: dbHostField; Layout.fillWidth: true; placeholderText: "100.86.4.84" }
 
-                Label { text: "Port:" }
+                Label { text: "Порт:" }
                 TextField { id: dbPortField; Layout.fillWidth: true; placeholderText: "5432"; validator: IntValidator { bottom: 1; top: 65535 } }
 
-                Label { text: "Database:" }
+                Label { text: "База данных:" }
                 TextField { id: dbNameField; Layout.fillWidth: true; placeholderText: "cost_online_demo" }
 
-                Label { text: "User:" }
+                Label { text: "Пользователь:" }
                 TextField { id: dbUserField; Layout.fillWidth: true; placeholderText: "cost_client_app" }
 
-                Label { text: "Password:" }
+                Label { text: "Пароль:" }
                 TextField { id: dbPasswordField; Layout.fillWidth: true; echoMode: TextInput.Password }
             }
 
@@ -514,7 +514,7 @@ ApplicationWindow {
         id: importDumpFileDialog
         title: "\u0412\u044b\u0431\u043e\u0440 SQL-\u0434\u0430\u043c\u043f\u0430"
         fileMode: FileDialog.OpenFile
-        nameFilters: ["SQL dump (*.sql)", "All files (*)"]
+        nameFilters: ["SQL-дамп (*.sql)", "Все файлы (*)"]
         onAccepted: {
             root.selectedDumpPath = root.normalizeFilePath(selectedFile)
             importDumpPhraseField.text = ""
@@ -763,24 +763,24 @@ ApplicationWindow {
                 columnSpacing: 10
                 rowSpacing: 8
 
-                Label { text: "Host:" }
+                Label { text: "Хост:" }
                 TextField { readOnly: true; text: root.onlineHostValue; Layout.fillWidth: true }
 
-                Label { text: "Port:" }
+                Label { text: "Порт:" }
                 TextField { readOnly: true; text: root.onlinePortValue; Layout.fillWidth: true }
 
-                Label { text: "Database:" }
+                Label { text: "База данных:" }
                 TextField { readOnly: true; text: root.onlineDbNameValue; Layout.fillWidth: true }
 
-                Label { text: "User:" }
+                Label { text: "Пользователь:" }
                 TextField { readOnly: true; text: root.onlineUserValue; Layout.fillWidth: true }
 
-                Label { text: "Password:" }
+                Label { text: "Пароль:" }
                 TextField { readOnly: true; text: root.onlinePasswordMaskedValue; Layout.fillWidth: true }
             }
 
             Label {
-                text: root.onlineConfigExportPath.length > 0 ? ("\u041f\u043e\u0441\u043b\u0435\u0434\u043d\u0438\u0439 client config.ini: " + root.onlineConfigExportPath) : ""
+                text: root.onlineConfigExportPath.length > 0 ? ("Последний клиентский config.ini: " + root.onlineConfigExportPath) : ""
                 visible: root.onlineConfigExportPath.length > 0
                 color: "#555"
                 wrapMode: Text.WordWrap
@@ -805,7 +805,7 @@ ApplicationWindow {
                 Layout.fillWidth: true
 
                 Button {
-                    text: "\u0412\u044b\u0433\u0440\u0443\u0437\u0438\u0442\u044c client config.ini"
+                    text: "Выгрузить клиентский config.ini"
                     onClicked: {
                         var result = backendObj ? backendObj.exportClientOnlineConfig() : {"ok": false, "message": "\u0411\u044d\u043a\u0435\u043d\u0434 \u043d\u0435\u0434\u043e\u0441\u0442\u0443\u043f\u0435\u043d", "path": ""}
                         root.settingsActionMessage = result.message || ""

@@ -246,13 +246,13 @@ Page {
                                 Label { text: "Расходы без налички:"; font.bold: true }
                                 Label { id: taxExpenseLabel; text: "0.00 руб." }
 
-                                Label { text: "Tax base:"; font.bold: true }
-                                Label { id: taxBaseLabel; text: "0.00 rub." }
-                                Label { text: "Tax:"; font.bold: true }
-                                Label { id: taxAmountLabel; text: "0.00 rub."; color: "#9b2f2f"; font.bold: true }
+                                Label { text: "Налоговая база:"; font.bold: true }
+                                Label { id: taxBaseLabel; text: "0.00 руб." }
+                                Label { text: "Налог:"; font.bold: true }
+                                Label { id: taxAmountLabel; text: "0.00 руб."; color: "#9b2f2f"; font.bold: true }
 
-                                Label { text: "Cash excluded:"; font.bold: true }
-                                Label { id: taxCashExcludedLabel; text: "0.00 rub."; Layout.columnSpan: compactLayout ? 1 : 3 }
+                                Label { text: "Исключено наличных:"; font.bold: true }
+                                Label { id: taxCashExcludedLabel; text: "0.00 руб."; Layout.columnSpan: compactLayout ? 1 : 3 }
 
                                 Label { text: "Последняя оплата:"; font.bold: true }
                                 Label {
@@ -292,7 +292,7 @@ Page {
                                 columnSpacing: 8
                                 rowSpacing: 8
 
-                                Label { text: "Р”Р°С‚Р°:" }
+                                Label { text: "????????:" }
                                 TextField { id: miscExpenseDateField; Layout.preferredWidth: 120; placeholderText: "ГГГГ-ММ-ДД" }
                                 Label { text: "Сумма:" }
                                 TextField { id: miscExpenseAmountField; Layout.preferredWidth: 120; placeholderText: "0.00"; validator: DoubleValidator { bottom: 0.01 } }
@@ -666,7 +666,7 @@ Page {
                                                 Layout.fillWidth: true
                                                 Label { text: model.notes || "Без примечания"; color: "#666"; Layout.fillWidth: true; elide: Text.ElideRight }
                                                 Button {
-                                                    text: "Edit"
+                                                    text: "Изменить"
                                                     onClicked: {
                                                         editCategoryId = model.id
                                                         editCategoryName.text = model.name
@@ -707,7 +707,7 @@ Page {
                                         anchors.rightMargin: 8
                                         spacing: 8
 
-                                        Text { Layout.preferredWidth: 100; text: "Р”Р°С‚Р°"; font.bold: true; verticalAlignment: Text.AlignVCenter }
+                                        Text { Layout.preferredWidth: 100; text: "????????"; font.bold: true; verticalAlignment: Text.AlignVCenter }
                                         Text { Layout.preferredWidth: 170; text: "Категория"; font.bold: true; verticalAlignment: Text.AlignVCenter }
                                         Text { Layout.fillWidth: true; text: "Модель станка"; font.bold: true; verticalAlignment: Text.AlignVCenter }
                                         Text { Layout.preferredWidth: 120; text: "Сумма"; font.bold: true; horizontalAlignment: Text.AlignRight; verticalAlignment: Text.AlignVCenter }
@@ -752,7 +752,7 @@ Page {
 
     Dialog {
         id: editCategoryDialog
-        title: "Edit category"
+        title: "Изменить категорию"
         standardButtons: Dialog.Ok | Dialog.Cancel
         width: 440
         height: 260

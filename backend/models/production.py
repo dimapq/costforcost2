@@ -361,7 +361,7 @@ def start_production_gui(machine_id, inventory_number, notes):
     """Creates one machine in progress with the provided inventory number."""
     inventory_number = (inventory_number or "").strip()
     if not inventory_number:
-        print("Machine ID is required to start production")
+        print("Для запуска производства укажите ID станка")
         return False
 
     with get_connection() as conn:
@@ -373,7 +373,7 @@ def start_production_gui(machine_id, inventory_number, notes):
             cur.execute("SELECT model FROM machines WHERE id = %s", (machine_id,))
             row = cur.fetchone()
             if not row:
-                print(f"Machine model with ID {machine_id} was not found")
+                print(f"Модель станка с ID {machine_id} не найдена")
                 return False
             model = row[0]
 

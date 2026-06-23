@@ -23,6 +23,25 @@ from backend.db.connection import get_connection
 
 
 class BackendController(QObject):
+    def _ensure_id_sequence(self, cur, table_name):
+        sequence_name = f"{table_name}_id_seq"
+        cur.execute("SELECT to_regclass(%s)", (sequence_name,))
+        row = cur.fetchone()
+        if not row or not row[0]:
+            return
+        cur.execute(
+            sql.SQL("ALTER TABLE {} ALTER COLUMN id SET DEFAULT nextval(%s)").format(
+                sql.Identifier(table_name)
+            ),
+            (sequence_name,)
+        )
+        cur.execute(
+            sql.SQL("SELECT setval(%s, COALESCE((SELECT MAX(id) FROM {}), 0) + 1, false)").format(
+                sql.Identifier(table_name)
+            ),
+            (sequence_name,)
+        )
+
     def _normalize_connection_mode(self, mode):
         return "online"
 
@@ -931,8 +950,21 @@ class BackendController(QObject):
                     cur.execute("""
                         INSERT INTO plate_material_types (id, name)
                         VALUES (%s, %s)
-                        ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name
-                    """, (plate_type_id, plate_type_name))
+                        ON CONFLICT (id) DO NOTHING
+                    """, (plate_type_id, f"__plate_type_{plate_type_id}__"))
+                for plate_type_id, plate_type_name in plate_types:
+                    cur.execute("""
+                        SELECT id
+                        FROM plate_material_types
+                        WHERE name = %s AND id <> %s
+                    """, (plate_type_name, plate_type_id))
+                    duplicate_ids = [row[0] for row in cur.fetchall()]
+                    for duplicate_id in duplicate_ids:
+                        cur.execute(
+                            "UPDATE plate_material_types SET name = %s WHERE id = %s",
+                            (f"__plate_type_duplicate_{duplicate_id}__", duplicate_id)
+                        )
+                    cur.execute("UPDATE plate_material_types SET name = %s WHERE id = %s", (plate_type_name, plate_type_id))
                 cur.execute("ALTER TABLE IF EXISTS materials ADD COLUMN IF NOT EXISTS is_plate BOOLEAN DEFAULT FALSE")
                 cur.execute("ALTER TABLE IF EXISTS materials ADD COLUMN IF NOT EXISTS plate_material_type_id INT REFERENCES plate_material_types(id)")
                 cur.execute("""
@@ -940,7 +972,7 @@ class BackendController(QObject):
                         id SERIAL PRIMARY KEY,
                         name VARCHAR(255) NOT NULL,
                         plate_material_type_id INT NOT NULL REFERENCES plate_material_types(id),
-                        part_unit VARCHAR(50) NOT NULL DEFAULT 'шт',
+                        part_unit VARCHAR(50) NOT NULL DEFAULT '\u0448\u0442',
                         production_minutes INT NOT NULL DEFAULT 0,
                         drawing_file_path TEXT,
                         process_file_path TEXT,
@@ -956,6 +988,9 @@ class BackendController(QObject):
                 cur.execute("ALTER TABLE IF EXISTS plate_part_templates ADD COLUMN IF NOT EXISTS process_file_name TEXT")
                 cur.execute("ALTER TABLE IF EXISTS plate_part_templates ADD COLUMN IF NOT EXISTS process_file_data BYTEA")
                 cur.execute("ALTER TABLE IF EXISTS plate_part_templates ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE")
+                self._ensure_id_sequence(cur, "plate_part_templates")
+                self._ensure_id_sequence(cur, "material_conversions")
+                self._ensure_id_sequence(cur, "material_transactions")
             conn.commit()
 
     def _ensure_material_reservation_schema(self, cur):
@@ -998,6 +1033,12 @@ class BackendController(QObject):
                 quantity DECIMAL(12, 4) NOT NULL DEFAULT 0
             )
         """)
+        self._ensure_id_sequence(cur, "materials")
+        self._ensure_id_sequence(cur, "purchases")
+        self._ensure_id_sequence(cur, "material_transactions")
+        self._ensure_id_sequence(cur, "material_conversions")
+        self._ensure_id_sequence(cur, "composite_material_recipes")
+        self._ensure_id_sequence(cur, "composite_material_recipe_items")
 
     def _read_plate_template_file(self, source_path):
         clean_source = (source_path or "").strip()

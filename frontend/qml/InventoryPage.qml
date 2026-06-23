@@ -131,16 +131,21 @@ Page {
                         anchors.fill: parent
                         spacing: 0
                         Repeater {
-                            model: ["ID", "Название", "Категория", "Остаток", "Цена за ед.", "Сумма", "Используется в", "Откуда взят", "Примечание", "Дата обновления"]
+                            model: materialModel.columnCount()
                             Rectangle {
                                 width: index === 0 ? 50 : index === 1 ? 220 : index === 2 ? 130 : index === 3 ? 90 : index === 4 ? 110 : index === 5 ? 110 : index === 6 ? 220 : index === 7 ? 200 : index === 8 ? 240 : 130
                                 height: 34
-                                color: "transparent"
+                                color: materialModel.getSortColumn() === index ? "#dfe8f5" : "transparent"
                                 Text {
                                     anchors.centerIn: parent
-                                    text: modelData
+                                    text: materialModel.getHeader(index) + (materialModel.getSortColumn() === index ? (materialModel.getSortAscending() ? " ^" : " v") : "")
                                     font.pixelSize: 13
                                     font.bold: true
+                                }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: materialModel.sortByColumn(index)
                                 }
                             }
                         }
