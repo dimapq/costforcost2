@@ -1,6 +1,6 @@
 {
-  "version": "1.7",
+  "version": "1.7.1",
   "url": "https://github.com/dimapq/costforcost2/releases/latest/download/MachineCostPro.zip",
-  "notes": "Release v1.7. Includes online-only connection flow, settings-based autotests, database name defaults switched to cost, and current UI/layout fixes.",
-  "sha256": "D6C9987518D691332BC47102D9CACE5DB5E6B4353FFA85830DE4024C1605DEF6"
+  "notes": "Release v1.7.1. Improves update reliability with resumable downloads and retry handling for broken connections, while keeping the online-only flow, autotests, database defaults to cost, and current UI fixes.",
+  "sha256": "2AD47C4DA4CDE29DB63054CE2007CA19B055565443CCAA365488D6B1F1F5C50A"
 }

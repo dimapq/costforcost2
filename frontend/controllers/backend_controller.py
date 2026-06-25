@@ -23,6 +23,13 @@ from backend.db.connection import get_connection
 
 
 class BackendController(QObject):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        try:
+            self._reconcile_purchase_quantities_to_inventory()
+        except Exception as e:
+            print(f"Ошибка служебной синхронизации остатков: {e}")
+
     def _ensure_id_sequence(self, cur, table_name):
         sequence_name = f"{table_name}_id_seq"
         cur.execute("SELECT to_regclass(%s)", (sequence_name,))
@@ -41,6 +48,86 @@ class BackendController(QObject):
             ),
             (sequence_name,)
         )
+
+    def _sync_purchase_quantities_for_material(self, cur, material_id, reason="Служебная синхронизация остатков"):
+        material_id = int(material_id)
+        cur.execute("SELECT COALESCE(quantity, 0) FROM material_inventory WHERE material_id = %s", (material_id,))
+        row = cur.fetchone()
+        target_qty = Decimal(str(row[0] if row else 0))
+
+        cur.execute("""
+            SELECT COALESCE(SUM(COALESCE(remaining_quantity, 0)), 0)
+            FROM purchases
+            WHERE material_id = %s
+        """, (material_id,))
+        purchase_total = Decimal(str((cur.fetchone() or [0])[0] or 0))
+        delta = target_qty - purchase_total
+
+        if delta > 0:
+            cur.execute("""
+                SELECT COALESCE(price_per_unit, 1), COALESCE(is_cash, FALSE)
+                FROM purchases
+                WHERE material_id = %s
+                ORDER BY purchase_date DESC NULLS LAST, id DESC
+                LIMIT 1
+            """, (material_id,))
+            price_row = cur.fetchone()
+            fallback_price = Decimal(str(price_row[0] if price_row and price_row[0] is not None else 1))
+            fallback_is_cash = bool(price_row[1]) if price_row else False
+            cur.execute("""
+                INSERT INTO purchases (material_id, price_per_unit, quantity, remaining_quantity, purchase_date, notes, is_cash)
+                VALUES (%s, %s, %s, %s, CURRENT_DATE, %s, %s)
+            """, (material_id, fallback_price, delta, delta, reason, fallback_is_cash))
+        elif delta < 0:
+            to_reduce = -delta
+            cur.execute("""
+                SELECT id, COALESCE(remaining_quantity, 0)
+                FROM purchases
+                WHERE material_id = %s
+                  AND COALESCE(remaining_quantity, 0) > 0
+                ORDER BY purchase_date ASC NULLS LAST, id ASC
+            """, (material_id,))
+            for purchase_id, remaining_quantity in cur.fetchall():
+                if to_reduce <= 0:
+                    break
+                lot_qty = Decimal(str(remaining_quantity or 0))
+                if lot_qty <= 0:
+                    continue
+                take = lot_qty if lot_qty < to_reduce else to_reduce
+                cur.execute("""
+                    UPDATE purchases
+                    SET remaining_quantity = GREATEST(COALESCE(remaining_quantity, 0) - %s, 0),
+                        notes = COALESCE(notes, '') ||
+                            CASE WHEN COALESCE(notes, '') = '' THEN '' ELSE E'\n' END ||
+                            %s
+                    WHERE id = %s
+                """, (take, reason, purchase_id))
+                to_reduce -= take
+
+        cur.execute("""
+            INSERT INTO material_inventory (material_id, quantity)
+            VALUES (%s, %s)
+            ON CONFLICT (material_id) DO UPDATE SET quantity = EXCLUDED.quantity
+        """, (material_id, target_qty))
+
+    def _reconcile_purchase_quantities_to_inventory(self, material_id=None):
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                if material_id is None:
+                    cur.execute("""
+                        SELECT m.id
+                        FROM materials m
+                        LEFT JOIN material_inventory inv ON inv.material_id = m.id
+                        LEFT JOIN purchases p ON p.material_id = m.id
+                        GROUP BY m.id, inv.quantity
+                        HAVING ABS(COALESCE(inv.quantity, 0) - COALESCE(SUM(COALESCE(p.remaining_quantity, 0)), 0)) > 0.0001
+                    """)
+                    material_ids = [row[0] for row in cur.fetchall()]
+                else:
+                    material_ids = [int(material_id)]
+                for current_material_id in material_ids:
+                    self._sync_purchase_quantities_for_material(cur, current_material_id)
+            conn.commit()
 
     def _normalize_connection_mode(self, mode):
         return "online"
@@ -3011,6 +3098,11 @@ class BackendController(QObject):
                         INSERT INTO inventory_adjustments (material_id, old_quantity, new_quantity, difference, reason)
                         VALUES (%s, %s, %s, %s, %s)
                     """, (material_id, old_qty, new_qty, diff, reason))
+                    self._sync_purchase_quantities_for_material(
+                        cur,
+                        material_id,
+                        reason=(reason or "Инвентаризация: синхронизация партий").strip()
+                    )
                     conn.commit()
             self._log_operation(
                 "Материалы",
@@ -4007,6 +4099,11 @@ class BackendController(QObject):
                             INSERT INTO inventory_adjustments (material_id, old_quantity, new_quantity, difference, reason)
                             VALUES (%s, %s, %s, %s, %s)
                         """, (material_id, old_qty, new_qty, diff, reason if reason else "Material update"))
+                        self._sync_purchase_quantities_for_material(
+                            cur,
+                            material_id,
+                            reason=(reason or "Обновление материала: синхронизация партий").strip()
+                        )
 
                     if new_price and new_price > 0:
                         new_price_decimal = Decimal(str(new_price))

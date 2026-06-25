@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Optional
 
 import requests
+from requests.exceptions import RequestException
 from PySide6.QtCore import QObject, Property, QCoreApplication, QMetaObject, Qt, Signal, Slot
 
 from version import (
@@ -204,43 +205,56 @@ class UpdateManager(QObject):
         finally:
             self._set_busy(False)
 
-    def _download_with_retries(self, download_url: str, zip_path: Path, attempts: int = 3):
+    def _download_with_retries(self, download_url: str, zip_path: Path, attempts: int = 5):
         last_error = None
+        partial_path = zip_path.with_suffix(zip_path.suffix + ".part")
         for attempt in range(1, attempts + 1):
             try:
-                if zip_path.exists():
-                    zip_path.unlink()
+                resume_from = partial_path.stat().st_size if partial_path.exists() else 0
+                headers = dict(self.REQUEST_HEADERS)
+                if resume_from > 0:
+                    headers["Range"] = f"bytes={resume_from}-"
                 with requests.get(
                     download_url,
                     stream=True,
-                    timeout=(20, 300),
-                    headers=self.REQUEST_HEADERS,
+                    timeout=(20, 120),
+                    headers=headers,
                 ) as response:
                     response.raise_for_status()
-                    total_size = int(response.headers.get("content-length") or 0)
-                    downloaded = 0
-                    with zip_path.open("wb") as fh:
-                        for chunk in response.iter_content(chunk_size=1024 * 256):
+                    if resume_from > 0 and response.status_code == 200:
+                        partial_path.unlink(missing_ok=True)
+                        resume_from = 0
+                    content_length = int(response.headers.get("content-length") or 0)
+                    total_size = resume_from + content_length if content_length > 0 else 0
+                    downloaded = resume_from
+                    mode = "ab" if resume_from > 0 else "wb"
+                    with partial_path.open(mode) as fh:
+                        for chunk in response.iter_content(chunk_size=1024 * 64):
                             if not chunk:
                                 continue
                             fh.write(chunk)
                             downloaded += len(chunk)
                             if total_size > 0:
                                 self._set_progress(round(downloaded * 100.0 / total_size, 1))
+                        fh.flush()
+                partial_path.replace(zip_path)
                 return
-            except Exception as e:
+            except RequestException as e:
                 last_error = e
-                if zip_path.exists():
-                    try:
-                        zip_path.unlink()
-                    except OSError:
-                        pass
                 if attempt < attempts:
                     self._set_status(
-                        f"\u0417\u0430\u0433\u0440\u0443\u0437\u043a\u0430 \u043e\u0431\u043e\u0440\u0432\u0430\u043b\u0430\u0441\u044c, \u043f\u043e\u0432\u0442\u043e\u0440 {attempt}/{attempts - 1}..."
+                        f"\u0417\u0430\u0433\u0440\u0443\u0437\u043a\u0430 \u043e\u0431\u043e\u0440\u0432\u0430\u043b\u0430\u0441\u044c, \u043f\u0440\u043e\u0431\u0443\u044e \u0434\u043e\u043a\u0430\u0447\u043a\u0443 ({attempt}/{attempts})..."
                     )
                 else:
                     break
+            except Exception as e:
+                last_error = e
+                break
+        if partial_path.exists():
+            try:
+                partial_path.unlink()
+            except OSError:
+                pass
         raise RuntimeError(last_error or "\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u0437\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u044c \u043e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u0438\u0435.")
 
     def _fetch_release_metadata(self):
