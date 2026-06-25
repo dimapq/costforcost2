@@ -10,6 +10,24 @@ Page {
     // Модели объявлены один раз в корне страницы
     MaterialTableModel { id: materialModel }
     ToolsTableModel { id: toolsModel }
+    ListModel { id: materialMachineFilterModel }
+
+    function reloadMaterialMachineFilter() {
+        materialMachineFilterModel.clear()
+        materialMachineFilterModel.append({ text: "Все станки", value: "" })
+        var rows = backend ? backend.get_machines() : []
+        for (var i = 0; i < rows.length; i++) {
+            var row = rows[i] || {}
+            materialMachineFilterModel.append({ text: row.model || "", value: row.model || "" })
+        }
+    }
+
+    Component.onCompleted: {
+        reloadMaterialMachineFilter()
+        materialModel.refresh()
+        toolsModel.refresh()
+    }
+
 
     TabBar {
         id: bar
@@ -34,13 +52,13 @@ Page {
             property int selectedMaterialRow: -1
             property int selectedMaterialId: -1
             property string selectedMaterialName: ""
+            property string selectedMaterialCategory: ""
             property string selectedMaterialUnit: ""
             property real selectedMaterialQty: 0
             property real selectedMaterialPrice: 0
             property string selectedMaterialSource: ""
             property string selectedMaterialNotes: ""
             property string selectedMaterialUpdatedDate: ""
-            property string selectedMaterialCategory: ""
             property real selectedMaterialLowThreshold: 1
             property real selectedMaterialEnoughThreshold: 3
 
@@ -49,7 +67,6 @@ Page {
                 anchors.margins: 10
                 spacing: 10
 
-                // Панель инструментов
                 RowLayout {
                     Layout.fillWidth: true
                     TextField {
@@ -64,8 +81,22 @@ Page {
                         onCurrentTextChanged: materialModel.setCategoryFilter(currentText)
                     }
                     Button {
+                        text: "По станку"
+                    }
+                    ComboBox {
+                        id: materialMachineFilter
+                        Layout.preferredWidth: 220
+                        model: materialMachineFilterModel
+                        textRole: "text"
+                        valueRole: "value"
+                        onCurrentValueChanged: materialModel.setMachineFilter(currentValue || "")
+                    }
+                    Button {
                         text: "Обновить"
-                        onClicked: materialModel.refresh()
+                        onClicked: {
+                            reloadMaterialMachineFilter()
+                            materialModel.refresh()
+                        }
                     }
                 }
 
@@ -211,287 +242,442 @@ Page {
                         }
                     }
                 }
-            }
 
-            // Диалог добавления вручную
-            Dialog {
-                id: manualAddDialog
-                title: "Добавить материал вручную"
-                standardButtons: Dialog.Ok | Dialog.Cancel
-                width: 500
-                height: 700
-                modal: true
-                contentItem: ScrollView {
-                    clip: true
-                    ScrollBar.vertical.policy: ScrollBar.AsNeeded
+
+                // Диалог добавления вручную
+                Dialog {
+                    id: manualAddDialog
+                    title: "Добавить материал вручную"
+                    standardButtons: Dialog.Ok | Dialog.Cancel
+
+                    width: 500
+                    height: Math.min(520, parent ? parent.height - 80 : 520)
+
+                    modal: true
+
+                    contentItem: ScrollView {
+                        id: manualAddScrollView
+                        clip: true
+
+                        ScrollBar.vertical.policy: ScrollBar.AsNeeded
+                        ScrollBar.horizontal.policy: ScrollBar.AsNeeded
+
+                        ColumnLayout {
+                            width: Math.max(manualAddDialog.availableWidth - 24, 320)
+                            spacing: 10
+
+                            Label { text: "Название:" }
+                            TextField {
+                                id: matName
+                                Layout.fillWidth: true
+                            }
+
+                            Label { text: "Единица измерения:" }
+                            TextField {
+                                id: matUnit
+                                Layout.fillWidth: true
+                                text: "шт"
+                            }
+
+                            Label { text: "Цена за единицу (руб):" }
+                            TextField {
+                                id: matPrice
+                                Layout.fillWidth: true
+                                validator: DoubleValidator { bottom: 0.01 }
+                            }
+
+                            Label { text: "Количество:" }
+                            TextField {
+                                id: matQty
+                                Layout.fillWidth: true
+                                validator: DoubleValidator { bottom: 0.01 }
+                            }
+
+                            Label { text: "Откуда взят:" }
+                            TextField {
+                                id: matSource
+                                Layout.fillWidth: true
+                                placeholderText: "Поставщик, сайт или ссылка"
+                            }
+
+                            Label { text: "Примечание:" }
+                            TextField {
+                                id: matNote
+                                Layout.fillWidth: true
+                                placeholderText: "Дополнительная информация"
+                            }
+
+                            Label { text: "Дата обновления (ГГГГ-ММ-ДД):" }
+                            TextField {
+                                id: matUpdatedDate
+                                Layout.fillWidth: true
+                                text: new Date().toISOString().slice(0, 10)
+                                placeholderText: "2026-05-18"
+                            }
+
+                            Label { text: "Порог мало:" }
+                            TextField {
+                                id: matLowThreshold
+                                Layout.fillWidth: true
+                                text: "1"
+                                validator: DoubleValidator { bottom: 0 }
+                            }
+
+                            Label { text: "Порог достаточно:" }
+                            TextField {
+                                id: matEnoughThreshold
+                                Layout.fillWidth: true
+                                text: "3"
+                                validator: DoubleValidator { bottom: 0.01 }
+                            }
+
+                            CheckBox {
+                                id: matIsCash
+                                text: "Наличка"
+                            }
+
+                            Item {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 16
+                            }
+                        }
+                    }
+
+                    onAccepted: {
+                        if (matName.text && matPrice.text && matQty.text) {
+                            backend.addMaterial(
+                                matName.text,
+                                matUnit.text,
+                                parseFloat(matPrice.text),
+                                parseFloat(matQty.text),
+                                matSource.text,
+                                matNote.text,
+                                matUpdatedDate.text,
+                                matIsCash.checked,
+                                matLowThreshold.text ? parseFloat(matLowThreshold.text) : 1,
+                                matEnoughThreshold.text ? parseFloat(matEnoughThreshold.text) : 3
+                            )
+
+                            materialModel.refresh()
+
+                            matName.clear()
+                            matUnit.text = "шт"
+                            matPrice.clear()
+                            matQty.clear()
+                            matSource.clear()
+                            matNote.clear()
+                            matUpdatedDate.text = new Date().toISOString().slice(0, 10)
+                            matLowThreshold.text = "1"
+                            matEnoughThreshold.text = "3"
+                            matIsCash.checked = false
+                        }
+                    }
+                }
+
+                // Диалог парсинга по ссылке
+                Dialog {
+                    id: parseDialog
+                    title: "Быстрое добавление по ссылке"
+                    standardButtons: Dialog.Ok | Dialog.Cancel
+                    width: 500
+                    height: 200
                     ColumnLayout {
-                        width: Math.max(manualAddDialog.availableWidth - 24, 320)
+                        anchors.fill: parent
                         spacing: 10
-                        Label { text: "Название:" }
-                        TextField { id: matName; Layout.fillWidth: true }
-                        Label { text: "Единица измерения:" }
-                        TextField { id: matUnit; Layout.fillWidth: true; text: "шт" }
-                        Label { text: "Цена за единицу (руб):" }
-                        TextField { id: matPrice; Layout.fillWidth: true; validator: DoubleValidator { bottom: 0.01 } }
-                        Label { text: "Количество:" }
-                        TextField { id: matQty; Layout.fillWidth: true; validator: DoubleValidator { bottom: 0.01 } }
-                        Label { text: "Откуда взят:" }
-                        TextField { id: matSource; Layout.fillWidth: true; placeholderText: "Поставщик, сайт или ссылка" }
-                        Label { text: "Примечание:" }
-                        TextField { id: matNote; Layout.fillWidth: true; placeholderText: "Дополнительная информация" }
-                        Label { text: "Дата обновления (ГГГГ-ММ-ДД):" }
-                        TextField { id: matUpdatedDate; Layout.fillWidth: true; text: new Date().toISOString().slice(0, 10); placeholderText: "2026-05-18" }
-                        Label { text: "Порог мало:" }
-                        TextField { id: matLowThreshold; Layout.fillWidth: true; text: "1"; validator: DoubleValidator { bottom: 0 } }
-                        Label { text: "Порог достаточно:" }
-                        TextField { id: matEnoughThreshold; Layout.fillWidth: true; text: "3"; validator: DoubleValidator { bottom: 0.01 } }
-                        CheckBox { id: matIsCash; text: "Наличка" }
+                        Label { text: "Вставьте ссылку на товар:" }
+                        TextField { id: urlInput; Layout.fillWidth: true }
                     }
-                }
-                onAccepted: {
-                    if (matName.text && matPrice.text && matQty.text) {
-                        backend.addMaterial(
-                            matName.text,
-                            matUnit.text,
-                            parseFloat(matPrice.text),
-                            parseFloat(matQty.text),
-                            matSource.text,
-                            matNote.text,
-                            matUpdatedDate.text,
-                            matIsCash.checked,
-                            matLowThreshold.text ? parseFloat(matLowThreshold.text) : 1,
-                            matEnoughThreshold.text ? parseFloat(matEnoughThreshold.text) : 3
-                        )
-                        materialModel.refresh()
-                        matName.clear()
-                        matUnit.text = "шт"
-                        matPrice.clear()
-                        matQty.clear()
-                        matSource.clear()
-                        matNote.clear()
-                        matUpdatedDate.text = new Date().toISOString().slice(0, 10)
-                        matLowThreshold.text = "1"
-                        matEnoughThreshold.text = "3"
-                        matIsCash.checked = false
-                    }
-                }
-            }
-
-            // Диалог парсинга по ссылке
-            Dialog {
-                id: parseDialog
-                title: "Быстрое добавление по ссылке"
-                standardButtons: Dialog.Ok | Dialog.Cancel
-                width: 500
-                height: 200
-                ColumnLayout {
-                    anchors.fill: parent
-                    spacing: 10
-                    Label { text: "Вставьте ссылку на товар:" }
-                    TextField { id: urlInput; Layout.fillWidth: true }
-                }
-                onAccepted: {
-                    if (urlInput.text) {
-                        backend.parseAndAddMaterial(urlInput.text)
-                        materialModel.refresh()
-                        urlInput.clear()
-                    }
-                }
-            }
-
-            // Диалог инвентаризации
-            Dialog {
-                id: inventoryDialog
-                title: "Корректировка остатка"
-                standardButtons: Dialog.Ok | Dialog.Cancel
-                width: 400
-                height: 300
-                ColumnLayout {
-                    anchors.fill: parent
-                    spacing: 10
-                    Label { text: "Выберите материал:" }
-                    ComboBox {
-                        id: materialCombo
-                        Layout.fillWidth: true
-                        model: backend ? backend.getMaterialsList() : []
-                        textRole: "name"
-                        valueRole: "id"
-                    }
-                    Label { text: "Новый остаток:" }
-                    TextField { id: newQty; Layout.fillWidth: true; validator: DoubleValidator { bottom: 0 } }
-                    Label { text: "Причина:" }
-                    TextField { id: reason; Layout.fillWidth: true }
-                }
-                onAccepted: {
-                    if (materialCombo.currentValue && newQty.text) {
-                        backend.adjustInventory(materialCombo.currentValue, parseFloat(newQty.text), reason.text)
-                        materialModel.refresh()
-                        materialsTab.selectedMaterialRow = -1
-                        materialsTab.selectedMaterialId = -1
-                        materialsTab.selectedMaterialName = ""
-                        materialsTab.selectedMaterialQty = 0
-                        newQty.clear()
-                        reason.clear()
-                    }
-                }
-            }
-
-            Dialog {
-                id: editQtyDialog
-                title: "Изменить количество"
-                standardButtons: Dialog.Ok | Dialog.Cancel
-                width: 420
-                height: 260
-
-                ColumnLayout {
-                    anchors.fill: parent
-                    spacing: 10
-                    Label { text: "Материал: " + materialsTab.selectedMaterialName }
-                    Label { text: "Текущий остаток: " + materialsTab.selectedMaterialQty.toFixed(2) }
-                    Label { text: "Новый остаток:" }
-                    TextField {
-                        id: editQtyField
-                        Layout.fillWidth: true
-                        validator: DoubleValidator { bottom: 0 }
-                    }
-                    Label { text: "Причина изменения:" }
-                    TextField {
-                        id: editReasonField
-                        Layout.fillWidth: true
-                        placeholderText: "Например: пересчёт остатков"
+                    onAccepted: {
+                        if (urlInput.text) {
+                            backend.parseAndAddMaterial(urlInput.text)
+                            materialModel.refresh()
+                            urlInput.clear()
+                        }
                     }
                 }
 
-                onAccepted: {
-                    if (materialsTab.selectedMaterialId > 0 && editQtyField.text) {
-                        backend.adjustInventory(
-                            materialsTab.selectedMaterialId,
-                            parseFloat(editQtyField.text),
-                            editReasonField.text
-                        )
-                        materialModel.refresh()
-                        materialsTab.selectedMaterialRow = -1
-                        materialsTab.selectedMaterialId = -1
-                        materialsTab.selectedMaterialName = ""
-                        materialsTab.selectedMaterialQty = 0
-                        editQtyField.clear()
-                        editReasonField.clear()
+                // Диалог инвентаризации
+                Dialog {
+                    id: inventoryDialog
+                    title: "Корректировка остатка"
+                    standardButtons: Dialog.Ok | Dialog.Cancel
+                    width: 400
+                    height: 300
+                    ColumnLayout {
+                        anchors.fill: parent
+                        spacing: 10
+                        Label { text: "Выберите материал:" }
+                        ComboBox {
+                            id: materialCombo
+                            Layout.fillWidth: true
+                            model: backend ? backend.getMaterialsList() : []
+                            textRole: "name"
+                            valueRole: "id"
+                        }
+                        Label { text: "Новый остаток:" }
+                        TextField { id: newQty; Layout.fillWidth: true; validator: DoubleValidator { bottom: 0 } }
+                        Label { text: "Причина:" }
+                        TextField { id: reason; Layout.fillWidth: true }
                     }
-                }
-            }
-
-            Dialog {
-                id: deleteMaterialDialog
-                title: "Удалить материал со склада"
-                standardButtons: Dialog.Yes | Dialog.No
-                width: 420
-                height: 220
-
-                ColumnLayout {
-                    anchors.fill: parent
-                    spacing: 10
-                    Label {
-                        Layout.fillWidth: true
-                        wrapMode: Text.WordWrap
-                        text: "Удалить со склада материал \"" + materialsTab.selectedMaterialName + "\"?\nОстаток будет установлен в 0."
-                    }
-                    Label { text: "Причина (необязательно):" }
-                    TextField {
-                        id: deleteReasonField
-                        Layout.fillWidth: true
-                        placeholderText: "Например: списание"
-                    }
-                }
-
-                onAccepted: {
-                    if (materialsTab.selectedMaterialId > 0) {
-                        backend.adjustInventory(materialsTab.selectedMaterialId, 0, deleteReasonField.text)
-                        materialModel.refresh()
-                        materialsTab.selectedMaterialRow = -1
-                        materialsTab.selectedMaterialId = -1
-                        materialsTab.selectedMaterialName = ""
-                        materialsTab.selectedMaterialQty = 0
-                        deleteReasonField.clear()
-                    }
-                }
-            }
-
-            Dialog {
-                id: editMaterialDialog
-                title: "Редактировать материал"
-                standardButtons: Dialog.Ok | Dialog.Cancel
-                width: 520
-                height: 650
-
-                ColumnLayout {
-                    anchors.fill: parent
-                    spacing: 8
-
-                    Label { text: "Название:" }
-                    TextField { id: editMaterialNameField; Layout.fillWidth: true }
-
-                    Label { text: "Единица измерения:" }
-                    TextField { id: editMaterialUnitField; Layout.fillWidth: true; placeholderText: "шт, м, кг..." }
-
-                    Label { text: "Количество:" }
-                    TextField { id: editMaterialQtyField; Layout.fillWidth: true; validator: DoubleValidator { bottom: 0 } }
-
-                    Label { text: "Цена за единицу (оставьте пустым, если не менять):" }
-                    TextField { id: editMaterialPriceField; Layout.fillWidth: true; validator: DoubleValidator { bottom: 0 } }
-
-                    Label { text: "Откуда взят:" }
-                    TextField { id: editMaterialSourceField; Layout.fillWidth: true }
-
-                    Label { text: "Примечание:" }
-                    TextField { id: editMaterialNotesField; Layout.fillWidth: true }
-
-                    Label { text: "Дата обновления (ГГГГ-ММ-ДД):" }
-                    TextField { id: editMaterialUpdatedDateField; Layout.fillWidth: true; placeholderText: "2026-05-18" }
-
-                    Label { text: "Порог мало:" }
-                    TextField { id: editMaterialLowThresholdField; Layout.fillWidth: true; text: "1"; validator: DoubleValidator { bottom: 0 } }
-
-                    Label { text: "Порог достаточно:" }
-                    TextField { id: editMaterialEnoughThresholdField; Layout.fillWidth: true; text: "3"; validator: DoubleValidator { bottom: 0.01 } }
-
-                    Label { text: "Причина/комментарий к изменению:" }
-                    TextField { id: editMaterialReasonField; Layout.fillWidth: true; placeholderText: "Например: уточнение карточки материала" }
-                }
-
-                onAccepted: {
-                    if (materialsTab.selectedMaterialId > 0 && editMaterialNameField.text && editMaterialQtyField.text) {
-                        if (backend.updateMaterial(
-                            materialsTab.selectedMaterialId,
-                            editMaterialNameField.text,
-                            editMaterialUnitField.text,
-                            parseFloat(editMaterialQtyField.text),
-                            editMaterialSourceField.text,
-                            editMaterialNotesField.text,
-                            editMaterialUpdatedDateField.text,
-                            editMaterialPriceField.text ? parseFloat(editMaterialPriceField.text) : 0,
-                            editMaterialReasonField.text,
-                            editMaterialLowThresholdField.text ? parseFloat(editMaterialLowThresholdField.text) : 1,
-                            editMaterialEnoughThresholdField.text ? parseFloat(editMaterialEnoughThresholdField.text) : 3
-                        )) {
+                    onAccepted: {
+                        if (materialCombo.currentValue && newQty.text) {
+                            backend.adjustInventory(materialCombo.currentValue, parseFloat(newQty.text), reason.text)
                             materialModel.refresh()
                             materialsTab.selectedMaterialRow = -1
                             materialsTab.selectedMaterialId = -1
                             materialsTab.selectedMaterialName = ""
-                            materialsTab.selectedMaterialUnit = ""
                             materialsTab.selectedMaterialQty = 0
-                            materialsTab.selectedMaterialPrice = 0
-                            materialsTab.selectedMaterialSource = ""
-                            materialsTab.selectedMaterialNotes = ""
-                            materialsTab.selectedMaterialUpdatedDate = ""
-                            materialsTab.selectedMaterialLowThreshold = 1
-                            materialsTab.selectedMaterialEnoughThreshold = 3
+                            newQty.clear()
+                            reason.clear()
+                        }
+                    }
+                }
+
+                Dialog {
+                    id: editQtyDialog
+                    title: "Изменить количество"
+                    standardButtons: Dialog.Ok | Dialog.Cancel
+
+                    width: 420
+                    height: 260
+
+                    modal: true
+
+                    property int minDialogWidth: 360
+                    property int minDialogHeight: 220
+                    property real resizeStartWidth: 0
+                    property real resizeStartHeight: 0
+                    property real resizeStartMouseX: 0
+                    property real resizeStartMouseY: 0
+
+                    contentItem: ScrollView {
+                        id: editQtyScrollView
+                        clip: true
+
+                        ScrollBar.vertical.policy: ScrollBar.AsNeeded
+                        ScrollBar.horizontal.policy: ScrollBar.AsNeeded
+
+                        ColumnLayout {
+                            width: Math.max(editQtyDialog.availableWidth - 24, 320)
+                            spacing: 10
+
+                            Label {
+                                Layout.fillWidth: true
+                                wrapMode: Text.WordWrap
+                                text: "Материал: " + materialsTab.selectedMaterialName
+                            }
+
+                            Label {
+                                Layout.fillWidth: true
+                                wrapMode: Text.WordWrap
+                                text: "Текущий остаток: " + materialsTab.selectedMaterialQty.toFixed(2)
+                            }
+
+                            Label {
+                                text: "Новый остаток:"
+                            }
+
+                            TextField {
+                                id: editQtyField
+                                Layout.fillWidth: true
+                                validator: DoubleValidator { bottom: 0 }
+                            }
+
+                            Label {
+                                text: "Причина изменения:"
+                            }
+
+                            TextField {
+                                id: editReasonField
+                                Layout.fillWidth: true
+                                placeholderText: "Например: пересчёт остатков"
+                            }
+
+                            Item {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 20
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        id: resizeHandle
+                        width: 18
+                        height: 18
+                        radius: 3
+                        color: "#cfcfcf"
+                        border.color: "#888"
+
+                        x: editQtyDialog.width - width - 6
+                        y: editQtyDialog.height - height - 6
+                        z: 1000
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "↘"
+                            font.pixelSize: 12
+                            color: "#444"
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.SizeFDiagCursor
+
+                            onPressed: function(mouse) {
+                                editQtyDialog.resizeStartWidth = editQtyDialog.width
+                                editQtyDialog.resizeStartHeight = editQtyDialog.height
+                                editQtyDialog.resizeStartMouseX = mouse.x
+                                editQtyDialog.resizeStartMouseY = mouse.y
+                            }
+
+                            onPositionChanged: function(mouse) {
+                                editQtyDialog.width = Math.max(
+                                    editQtyDialog.minDialogWidth,
+                                    editQtyDialog.resizeStartWidth + mouse.x - editQtyDialog.resizeStartMouseX
+                                )
+
+                                editQtyDialog.height = Math.max(
+                                    editQtyDialog.minDialogHeight,
+                                    editQtyDialog.resizeStartHeight + mouse.y - editQtyDialog.resizeStartMouseY
+                                )
+                            }
+                        }
+                    }
+
+                    onAccepted: {
+                        if (materialsTab.selectedMaterialId > 0 && editQtyField.text) {
+                            backend.adjustInventory(
+                                materialsTab.selectedMaterialId,
+                                parseFloat(editQtyField.text),
+                                editReasonField.text
+                            )
+
+                            materialModel.refresh()
+
+                            materialsTab.selectedMaterialRow = -1
+                            materialsTab.selectedMaterialId = -1
+                            materialsTab.selectedMaterialName = ""
+                            materialsTab.selectedMaterialQty = 0
+
+                            editQtyField.clear()
+                            editReasonField.clear()
+                        }
+                    }
+                }
+
+                Dialog {
+                    id: deleteMaterialDialog
+                    title: "Удалить материал со склада"
+                    standardButtons: Dialog.Yes | Dialog.No
+                    width: 420
+                    height: 220
+
+                    ColumnLayout {
+                        anchors.fill: parent
+                        spacing: 10
+                        Label {
+                            Layout.fillWidth: true
+                            wrapMode: Text.WordWrap
+                            text: "Удалить со склада материал \"" + materialsTab.selectedMaterialName + "\"?\nОстаток будет установлен в 0."
+                        }
+                        Label { text: "Причина (необязательно):" }
+                        TextField {
+                            id: deleteReasonField
+                            Layout.fillWidth: true
+                            placeholderText: "Например: списание"
+                        }
+                    }
+
+                    onAccepted: {
+                        if (materialsTab.selectedMaterialId > 0) {
+                            backend.adjustInventory(materialsTab.selectedMaterialId, 0, deleteReasonField.text)
+                            materialModel.refresh()
+                            materialsTab.selectedMaterialRow = -1
+                            materialsTab.selectedMaterialId = -1
+                            materialsTab.selectedMaterialName = ""
+                            materialsTab.selectedMaterialQty = 0
+                            deleteReasonField.clear()
+                        }
+                    }
+                }
+
+                Dialog {
+                    id: editMaterialDialog
+                    title: "Редактировать материал"
+                    standardButtons: Dialog.Ok | Dialog.Cancel
+                    width: 520
+                    height: 650
+
+                    ColumnLayout {
+                        anchors.fill: parent
+                        spacing: 8
+
+                        Label { text: "Название:" }
+                        TextField { id: editMaterialNameField; Layout.fillWidth: true }
+
+                        Label { text: "Единица измерения:" }
+                        TextField { id: editMaterialUnitField; Layout.fillWidth: true; placeholderText: "шт, м, кг..." }
+
+                        Label { text: "Количество:" }
+                        TextField { id: editMaterialQtyField; Layout.fillWidth: true; validator: DoubleValidator { bottom: 0 } }
+
+                        Label { text: "Цена за единицу (оставьте пустым, если не менять):" }
+                        TextField { id: editMaterialPriceField; Layout.fillWidth: true; validator: DoubleValidator { bottom: 0 } }
+
+                        Label { text: "Откуда взят:" }
+                        TextField { id: editMaterialSourceField; Layout.fillWidth: true }
+
+                        Label { text: "Примечание:" }
+                        TextField { id: editMaterialNotesField; Layout.fillWidth: true }
+
+                        Label { text: "Дата обновления (ГГГГ-ММ-ДД):" }
+                        TextField { id: editMaterialUpdatedDateField; Layout.fillWidth: true; placeholderText: "2026-05-18" }
+
+                        Label { text: "Порог мало:" }
+                        TextField { id: editMaterialLowThresholdField; Layout.fillWidth: true; text: "1"; validator: DoubleValidator { bottom: 0 } }
+
+                        Label { text: "Порог достаточно:" }
+                        TextField { id: editMaterialEnoughThresholdField; Layout.fillWidth: true; text: "3"; validator: DoubleValidator { bottom: 0.01 } }
+
+                        Label { text: "Причина/комментарий к изменению:" }
+                        TextField { id: editMaterialReasonField; Layout.fillWidth: true; placeholderText: "Например: уточнение карточки материала" }
+                    }
+
+                    onAccepted: {
+                        if (materialsTab.selectedMaterialId > 0 && editMaterialNameField.text && editMaterialQtyField.text) {
+                            if (backend.updateMaterial(
+                                materialsTab.selectedMaterialId,
+                                editMaterialNameField.text,
+                                editMaterialUnitField.text,
+                                parseFloat(editMaterialQtyField.text),
+                                editMaterialSourceField.text,
+                                editMaterialNotesField.text,
+                                editMaterialUpdatedDateField.text,
+                                editMaterialPriceField.text ? parseFloat(editMaterialPriceField.text) : 0,
+                                editMaterialReasonField.text,
+                                editMaterialLowThresholdField.text ? parseFloat(editMaterialLowThresholdField.text) : 1,
+                                editMaterialEnoughThresholdField.text ? parseFloat(editMaterialEnoughThresholdField.text) : 3
+                            )) {
+                                materialModel.refresh()
+                                materialsTab.selectedMaterialRow = -1
+                                materialsTab.selectedMaterialId = -1
+                                materialsTab.selectedMaterialName = ""
+                                materialsTab.selectedMaterialUnit = ""
+                                materialsTab.selectedMaterialQty = 0
+                                materialsTab.selectedMaterialPrice = 0
+                                materialsTab.selectedMaterialSource = ""
+                                materialsTab.selectedMaterialNotes = ""
+                                materialsTab.selectedMaterialUpdatedDate = ""
+                                materialsTab.selectedMaterialLowThreshold = 1
+                                materialsTab.selectedMaterialEnoughThreshold = 3
+                            }
                         }
                     }
                 }
             }
         }
-
         // ================= СОСТАВНЫЕ МАТЕРИАЛЫ =================
+
         Item {
             id: compositeTab
             property int selectedRecipeRow: -1
@@ -1772,11 +1958,5 @@ Page {
                 }
             }
         }
-    }
-
-    // Обновление обеих моделей при загрузке страницы
-    Component.onCompleted: {
-        materialModel.refresh()
-        toolsModel.refresh()
     }
 }

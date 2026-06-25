@@ -1,6 +1,7 @@
 # frontend/controllers/table_models.py
 from PySide6.QtCore import QAbstractListModel, QAbstractTableModel, Qt, QModelIndex, Slot
 from backend.db.connection import get_connection
+from backend.models.machine import fetch_machines_with_calculated_costs, normalize_null_purchase_prices
 
 
 class MaterialTableModel(QAbstractTableModel):
@@ -8,6 +9,7 @@ class MaterialTableModel(QAbstractTableModel):
         super().__init__()
         self._data = []
         self._category_filter = ""
+        self._machine_filter = ""
         self._sort_column = 1
         self._sort_ascending = True
         self._extra_headers = ["Используется в", "Откуда взят", "Примечание", "Дата обновления"]
@@ -138,6 +140,12 @@ class MaterialTableModel(QAbstractTableModel):
         self._category_filter = "" if normalized in ("", "Все") else normalized
         self.refresh()
 
+    @Slot(str)
+    def setMachineFilter(self, machine_model):
+        normalized = (machine_model or "").strip()
+        self._machine_filter = "" if normalized in ("", "Все", "Все станки") else normalized
+        self.refresh()
+
     @Slot()
     def refresh(self):
         self.beginResetModel()
@@ -246,6 +254,11 @@ class MaterialTableModel(QAbstractTableModel):
                 ]
                 if self._category_filter:
                     data = [row for row in data if (row.get('category') or '') == self._category_filter]
+                if self._machine_filter:
+                    data = [
+                        row for row in data
+                        if self._machine_filter in [item.strip() for item in (row.get('used_in') or '').split(',') if item.strip()]
+                    ]
                 self._data = data
                 self._apply_sort()
         self.endResetModel()
@@ -424,8 +437,8 @@ class MachineListModel(QAbstractListModel):
         self.beginResetModel()
         with get_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute("SELECT id, model, total_cost FROM machines ORDER BY model")
-                rows = cur.fetchall()
+                rows = fetch_machines_with_calculated_costs(cur)
+                rows.sort(key=lambda item: (item[1] or "").lower())
                 self._all_data = [
                     {'id': r[0], 'model': r[1] or 'Без названия', 'cost': float(r[2]) if r[2] else 0.0}
                     for r in rows
@@ -506,11 +519,14 @@ class MachineSpecModel(QAbstractTableModel):
         self.beginResetModel()
         with get_connection() as conn:
             with conn.cursor() as cur:
+                cur.execute("SELECT material_id FROM machine_materials WHERE machine_id = %s", (self._machine_id,))
+                material_ids = [row[0] for row in cur.fetchall()]
+                normalize_null_purchase_prices(cur, material_ids)
                 cur.execute("""
                     WITH latest_prices AS (
                         SELECT DISTINCT ON (material_id) material_id, price_per_unit
                         FROM purchases WHERE price_per_unit IS NOT NULL
-                        ORDER BY material_id, purchase_date DESC
+                        ORDER BY material_id, purchase_date DESC NULLS LAST, id DESC
                     )
                     SELECT mm.material_id, m.name, mm.quantity, lp.price_per_unit
                     FROM machine_materials mm

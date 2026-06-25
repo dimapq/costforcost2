@@ -18,7 +18,7 @@ from backend.models.inventory import get_materials_summary
 from backend.models.tools import get_tools_summary
 from backend.models.production import get_finished_goods_summary
 from backend.models.analytics import get_recent_transactions
-from backend.models.machine import list_machines, calculate_machine_cost_from_purchases
+from backend.models.machine import list_machines, calculate_machine_cost_from_purchases, fetch_machines_with_calculated_costs, normalize_null_purchase_prices
 from backend.db.connection import get_connection
 
 
@@ -72,7 +72,7 @@ class BackendController(QObject):
         config = configparser.ConfigParser()
         host = str(profile.get("host", "localhost") or "localhost").strip()
         port = str(profile.get("port", "5432") or "5432").strip()
-        name = str(profile.get("name", "cost_online_demo") or "cost_online_demo").strip()
+        name = str(profile.get("name", "cost") or "cost").strip()
         user = str(profile.get("user", "cost_client_app") or "cost_client_app").strip()
         password = str(profile.get("password", "") or "")
         sslmode = self._resolve_sslmode(host, profile.get("sslmode", ""))
@@ -116,7 +116,7 @@ class BackendController(QObject):
             return {
                 "host": db.get('host', 'localhost'),
                 "port": db.get('port', '5432'),
-                "name": db.get('name', 'cost_online_demo'),
+                "name": db.get('name', 'cost'),
                 "user": db.get('user', 'cost_client_app'),
                 "password": db.get('password', ''),
                 "sslmode": self._resolve_sslmode(db.get('host', 'localhost'), db.get('sslmode', '')),
@@ -130,7 +130,7 @@ class BackendController(QObject):
             return {
                 "host": "localhost",
                 "port": "5432",
-                "name": "cost_online_demo",
+                "name": "cost",
                 "user": "cost_client_app",
                 "password": "",
                 "sslmode": "disable",
@@ -158,7 +158,7 @@ class BackendController(QObject):
             return {
                 "host": db.get("host", "localhost"),
                 "port": db.get("port", "5432"),
-                "name": db.get("name", "cost_online_demo"),
+                "name": db.get("name", "cost"),
                 "user": db.get("user", "cost_client_app"),
                 "password": db.get("password", ""),
                 "sslmode": self._resolve_sslmode(db.get("host", "localhost"), db.get("sslmode", "")),
@@ -174,7 +174,7 @@ class BackendController(QObject):
             return {
                 "host": "localhost",
                 "port": "5432",
-                "name": "cost_online_demo",
+                "name": "cost",
                 "user": "cost_client_app",
                 "password": "CostClientApp_2026!",
                 "sslmode": "require",
@@ -202,7 +202,7 @@ class BackendController(QObject):
                 "ok": True,
                 "host": profile.get("host", "localhost"),
                 "port": profile.get("port", "5432"),
-                "name": profile.get("name", "cost_online_demo"),
+                "name": profile.get("name", "cost"),
                 "user": profile.get("user", "cost_client_app"),
                 "password": profile.get("password", ""),
                 "masked_password": self._mask_password(profile.get("password", "")),
@@ -235,7 +235,7 @@ class BackendController(QObject):
             conn = psycopg2.connect(
                 host=str(profile.get("host", "localhost") or "localhost").strip(),
                 port=int(profile.get("port", "5432") or 5432),
-                dbname=str(profile.get("name", "cost_online_demo") or "cost_online_demo").strip(),
+                dbname=str(profile.get("name", "cost") or "cost").strip(),
                 user=str(profile.get("user", "cost_client_app") or "cost_client_app").strip(),
                 password=str(profile.get("password", "") or ""),
                 connect_timeout=5,
@@ -307,7 +307,7 @@ class BackendController(QObject):
             conn = psycopg2.connect(
                 host=(host or 'localhost').strip(),
                 port=int(port or 5432),
-                dbname=(name or 'cost_online_demo').strip(),
+                dbname=(name or 'cost').strip(),
                 user=(user or 'cost_client_app').strip(),
                 password=password or '',
                 connect_timeout=3,
@@ -635,6 +635,98 @@ class BackendController(QObject):
             except Exception:
                 pass
 
+    def _run_null_price_autotest(self):
+        conn = None
+        suffix = f"{date.today().isoformat()}_{random.randint(1000, 9999)}"
+        material_name = f"NULL_PRICE_AUTOTEST_{suffix}"
+        machine_model = f"NULL_PRICE_MACHINE_{suffix}"
+        try:
+            qty = Decimal(str(random.randint(2, 9)))
+            conn = get_connection()
+            conn.autocommit = False
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO materials (
+                        name, unit, source, notes, updated_date,
+                        low_stock_threshold, enough_stock_threshold, category
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING id
+                    """,
+                    (
+                        material_name,
+                        "шт",
+                        "Автотест",
+                        "Проверка восстановления NULL-цены",
+                        date.today(),
+                        1,
+                        3,
+                        "Материалы",
+                    ),
+                )
+                material_id = cur.fetchone()[0]
+                cur.execute(
+                    "INSERT INTO material_inventory (material_id, quantity) VALUES (%s, %s)",
+                    (material_id, qty),
+                )
+                cur.execute(
+                    """
+                    INSERT INTO purchases (
+                        material_id, price_per_unit, quantity, remaining_quantity, purchase_date, notes
+                    )
+                    VALUES (%s, NULL, %s, %s, %s, %s)
+                    RETURNING id
+                    """,
+                    (material_id, qty, qty, date.today(), "Null price autotest lot"),
+                )
+                purchase_id = cur.fetchone()[0]
+                cur.execute(
+                    "INSERT INTO machines (model, total_cost) VALUES (%s, %s) RETURNING id",
+                    (machine_model, Decimal("0")),
+                )
+                machine_id = cur.fetchone()[0]
+                cur.execute(
+                    "INSERT INTO machine_materials (machine_id, material_id, quantity) VALUES (%s, %s, %s)",
+                    (machine_id, material_id, qty),
+                )
+                normalize_null_purchase_prices(cur, [material_id])
+                recalculated = fetch_machines_with_calculated_costs(cur)
+                cur.execute("SELECT price_per_unit FROM purchases WHERE id = %s", (purchase_id,))
+                fixed_price = Decimal(str(cur.fetchone()[0] or 0))
+                current_total = Decimal("0")
+                for row in recalculated:
+                    if row[0] == machine_id:
+                        current_total = Decimal(str(row[2] or 0))
+                        break
+
+                expected_total = qty * Decimal("1")
+                ok = fixed_price == Decimal("1") and current_total == expected_total
+                details = (
+                    f"Ожидалась цена 1.00 и стоимость {expected_total:.2f} руб.; "
+                    f"получено цена {fixed_price:.2f}, стоимость {current_total:.2f}."
+                )
+                conn.rollback()
+            return self._make_autotest_result(
+                "NULL-цены материалов",
+                ok,
+                "NULL-цены автоматически исправляются." if ok else "NULL-цены материалов обработаны некорректно.",
+                details,
+            )
+        except Exception as e:
+            if conn is not None:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+            return self._make_autotest_result("NULL-цены материалов", False, "Ошибка автотеста NULL-цен.", str(e))
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+
     def _run_inventory_autotest(self):
         try:
             with get_connection() as conn:
@@ -846,6 +938,7 @@ class BackendController(QObject):
         results = [
             fifo_result,
             self._run_cost_autotest(),
+            self._run_null_price_autotest(),
             self._run_inventory_autotest(),
             self._run_transactions_autotest(),
             self._run_indirect_autotest(),

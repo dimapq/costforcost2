@@ -1,11 +1,61 @@
 from decimal import Decimal
 from backend.db.connection import get_connection
 
+DEFAULT_FALLBACK_PRICE = Decimal("1.00")
+
+
+def normalize_null_purchase_prices(cur, material_ids=None, fallback_price=DEFAULT_FALLBACK_PRICE):
+    query = """
+        UPDATE purchases
+        SET price_per_unit = %s
+        WHERE price_per_unit IS NULL
+    """
+    params = [fallback_price]
+    if material_ids is not None:
+        normalized_ids = [int(mid) for mid in material_ids if mid is not None]
+        if not normalized_ids:
+            return 0
+        query += " AND material_id = ANY(%s)"
+        params.append(normalized_ids)
+    cur.execute(query, params)
+    return cur.rowcount or 0
+
+
+def fetch_machines_with_calculated_costs(cur):
+    normalize_null_purchase_prices(cur)
+    cur.execute("""
+        WITH latest_prices AS (
+            SELECT DISTINCT ON (material_id)
+                material_id,
+                price_per_unit
+            FROM purchases
+            WHERE price_per_unit IS NOT NULL
+            ORDER BY material_id, purchase_date DESC NULLS LAST, id DESC
+        )
+        SELECT
+            mach.id,
+            mach.model,
+            COALESCE(SUM(COALESCE(mm.quantity, 0) * COALESCE(lp.price_per_unit, 0)), 0)::DECIMAL(12, 2) AS total_cost
+        FROM machines mach
+        LEFT JOIN machine_materials mm ON mm.machine_id = mach.id
+        LEFT JOIN latest_prices lp ON lp.material_id = mm.material_id
+        GROUP BY mach.id, mach.model
+        ORDER BY mach.id
+    """)
+    rows = cur.fetchall()
+    if rows:
+        cur.executemany(
+            "UPDATE machines SET total_cost = %s WHERE id = %s",
+            [(row[2], row[0]) for row in rows],
+        )
+    return rows
+
+
 def list_machines():
     with get_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT id, model, total_cost FROM machines ORDER BY id")
-            machines = cur.fetchall()
+            machines = fetch_machines_with_calculated_costs(cur)
+        conn.commit()
     if not machines:
         print("Станков в базе нет.")
         return []
@@ -44,6 +94,7 @@ def calculate_machine_cost_from_purchases(machine_id):
                 WHERE machine_id = %s
             """, (machine_id,))
             materials = cur.fetchall()
+            normalize_null_purchase_prices(cur, [material_id for material_id, _ in materials])
 
             total = Decimal("0")
             for material_id, required_qty in materials:

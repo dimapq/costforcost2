@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 
 import PySide6
-from PySide6.QtCore import QUrl
+from PySide6.QtCore import QTimer, QUrl
 from PySide6.QtGui import QGuiApplication, QIcon
 from PySide6.QtQml import QQmlApplicationEngine, qmlRegisterType
 
@@ -17,6 +17,7 @@ from frontend.controllers.table_models import (
     MaterialTableModel,
     ToolsTableModel,
 )
+from frontend.startup_test_runner import StartupTestRunner
 from frontend.update_manager import UpdateManager
 from version import APP_NAME, APP_VERSION_LABEL, APP_EXE_NAME, UPDATER_EXE_NAME
 
@@ -99,19 +100,48 @@ if __name__ == "__main__":
         updater_path=install_dir / UPDATER_EXE_NAME,
         enabled=updates_enabled,
     )
+    startup_test_runner = StartupTestRunner(
+        root_dir=root_dir,
+        qml_dir=qml_dir,
+        install_dir=install_dir,
+    )
 
     engine.rootContext().setContextProperty("backend", backend)
     engine.rootContext().setContextProperty("updateManager", update_manager)
+    engine.rootContext().setContextProperty("startupTestRunner", startup_test_runner)
     engine.rootContext().setContextProperty("appLogoPath", QUrl.fromLocalFile(str(app_logo_path)).toString())
     engine.rootContext().setContextProperty("updateLogoPath", QUrl.fromLocalFile(str(update_logo_path)).toString())
     engine.rootContext().setContextProperty("appTitle", f"{APP_NAME} {APP_VERSION_LABEL}")
     engine.rootContext().setContextProperty("appVersionLabel", APP_VERSION_LABEL)
     engine.rootContext().setContextProperty("appExecutableName", APP_EXE_NAME)
 
-    qml_file = qml_dir / "Main.qml"
-    engine.load(QUrl.fromLocalFile(str(qml_file)))
+    main_loaded = {"value": False}
+    startup_root = {"value": None}
+
+    def load_main_window():
+        if main_loaded["value"]:
+            return
+        main_loaded["value"] = True
+
+        main_qml_file = qml_dir / "Main.qml"
+        root_count_before = len(engine.rootObjects())
+        engine.load(QUrl.fromLocalFile(str(main_qml_file)))
+
+        if len(engine.rootObjects()) <= root_count_before:
+            app.quit()
+            return
+
+        if startup_root["value"] is not None:
+            startup_root["value"].close()
+            startup_root["value"].deleteLater()
+
+    startup_test_runner.allTestsPassed.connect(lambda: QTimer.singleShot(700, load_main_window))
+
+    startup_qml_file = qml_dir / "StartupCheckPage.qml"
+    engine.load(QUrl.fromLocalFile(str(startup_qml_file)))
 
     if not engine.rootObjects():
         sys.exit(-1)
+    startup_root["value"] = engine.rootObjects()[0]
     sys.exit(app.exec())
 

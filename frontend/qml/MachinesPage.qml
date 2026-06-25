@@ -39,8 +39,10 @@ Page {
 
                 // Left side: machines in progress
                 Item {
-                    SplitView.preferredWidth: 400
-                    SplitView.minimumWidth: 300
+                    SplitView.preferredWidth: 740
+                    SplitView.minimumWidth: 720
+                    SplitView.maximumWidth: 900
+                    clip: true
 
                     ColumnLayout {
                         anchors.fill: parent
@@ -69,16 +71,17 @@ Page {
                         // Table header
                         Rectangle {
                             Layout.fillWidth: true
-                            height: 30
+                            height: 44
                             color: "#e8e8e8"
+                            clip: true
                             RowLayout {
                                 anchors.fill: parent
                                 spacing: 0
                                 Repeater {
-                                    model: ["#", "Модель", "ID станка", "Дата начала", "Часы", "Косвенные", "Общая", "Примечание"]
+                                    model: ["#", "Модель", "ID", "Дата начала", "Часы", "Косвенные", "Общая", "Примечание"]
                                     Rectangle {
-                                        width: index === 0 ? 50 : index === 1 ? 150 : index === 2 ? 110 : index === 3 ? 105 : index === 4 ? 80 : index === 5 ? 110 : index === 6 ? 110 : 180
-                                        height: 30
+                                        width: index === 0 ? 50 : index === 1 ? 120 : index === 2 ? 37 : index === 3 ? 95 : index === 4 ? 70 : index === 5 ? 95 : index === 6 ? 95 : 150
+                                        height: 44
                                         border.color: "#ccc"
                                         color: "transparent"
                                         Text {
@@ -86,6 +89,9 @@ Page {
                                             text: modelData
                                             font.pixelSize: 13
                                             font.bold: true
+                                            horizontalAlignment: Text.AlignHCenter
+                                            verticalAlignment: Text.AlignVCenter
+                                            wrapMode: Text.WordWrap
                                         }
                                     }
                                 }
@@ -100,13 +106,13 @@ Page {
                             clip: true
                             columnWidthProvider: function(column) {
                                 if (column === 0) return 50
-                                if (column === 1) return 150
-                                if (column === 2) return 110
-                                if (column === 3) return 105
-                                if (column === 4) return 80
-                                if (column === 5) return 110
-                                if (column === 6) return 110
-                                return 180
+                                if (column === 1) return 120
+                                if (column === 2) return 37
+                                if (column === 3) return 95
+                                if (column === 4) return 70
+                                if (column === 5) return 95
+                                if (column === 6) return 95
+                                return 150
                             }
                             
                             delegate: Rectangle {
@@ -137,8 +143,10 @@ Page {
                             }
                         }
 
-                        RowLayout {
+                        Flow {
                             Layout.fillWidth: true
+                            Layout.preferredHeight: implicitHeight
+                            spacing: 6
                             Button {
                                 text: "Завершить производство"
                                 enabled: tab1Root.selectedInProgressId > 0 && materialsCheckList.allMaterialsAvailable
@@ -213,7 +221,8 @@ Page {
                 // Р СџР В Р С’Р вЂ™Р С’Р Р‡ Р СџР С’Р СњР вЂўР вЂєР В¬: Р СџРЎР‚Р С•Р Р†Р ВµРЎР‚Р С”Р В° Р СР В°РЎвЂљР ВµРЎР‚Р С‘Р В°Р В»Р С•Р Р†
                 Item {
                     SplitView.fillWidth: true
-                    SplitView.minimumWidth: 450
+                    SplitView.minimumWidth: 612
+                    clip: true
 
                     ColumnLayout {
                         anchors.fill: parent
@@ -231,7 +240,7 @@ Page {
                         // Р вЂ”Р В°Р С–Р С•Р В»Р С•Р Р†Р С•Р С” РЎвЂљР В°Р В±Р В»Р С‘РЎвЂ РЎвЂ№ Р СР В°РЎвЂљР ВµРЎР‚Р С‘Р В°Р В»Р С•Р Р†
                         Rectangle {
                             Layout.fillWidth: true
-                            height: 35
+                            height: 44
                             color: "#e8e8e8"
                             border.color: "#ccc"
                             visible: tab1Root.selectedInProgressId > 0
@@ -240,10 +249,10 @@ Page {
                                 anchors.fill: parent
                                 spacing: 0
                                 Repeater {
-                                    model: ["Материал", "Требуется", "В резерве", "На складе", "Статус"]
+                                    model: ["Материал", "Требуется", "В резерве", "На складе", "Статус\nматериала"]
                                     Rectangle {
                                         width: index === 0 ? 190 : index === 1 ? 90 : index === 2 ? 90 : index === 3 ? 90 : 110
-                                        height: 35
+                                        height: 44
                                         border.width: 0
                                         color: "transparent"
                                         Text {
@@ -251,6 +260,9 @@ Page {
                                             text: modelData
                                             font.pixelSize: 13
                                             font.bold: true
+                                            horizontalAlignment: Text.AlignHCenter
+                                            verticalAlignment: Text.AlignVCenter
+                                            wrapMode: Text.WordWrap
                                         }
                                     }
                                 }
@@ -387,7 +399,7 @@ Page {
                         GroupBox {
                             Layout.fillWidth: true
                             visible: tab1Root.selectedInProgressId > 0 && !materialsCheckList.allMaterialsAvailable
-                            title: "Статус материалов"
+                            title: "Статус\nматериалов"
 
                             ColumnLayout {
                                 anchors.fill: parent
@@ -789,16 +801,16 @@ Page {
                         // Заголовок таблицы
                         Rectangle {
                             Layout.fillWidth: true
-                            height: 30
+                            height: 48
                             color: "#e8e8e8"
                             RowLayout {
                                 anchors.fill: parent
                                 spacing: 0
                                 Repeater {
-                                    model: ["#", "Модель", "Инв. №", "Дата начала", "Дата продажи", "Дней", "Покупатель", "Себестоимость реальная", "Себестоимость налогоуплачиваемая", "Цена продажи", "Прибыль"]
+                                    model: ["#", "Модель", "Инв. №", "Дата\nначала", "Дата\nпродажи", "Дней", "Покупатель", "Себестоимость\nреальная", "Себестоимость\nналогоуплачиваемая", "Цена\nпродажи", "Прибыль"]
                                     Rectangle {
                                         width: index === 0 ? 50 : index === 1 ? 150 : index === 2 ? 100 : index === 3 ? 110 : index === 4 ? 120 : index === 5 ? 70 : index === 6 ? 150 : index === 7 ? 150 : index === 8 ? 190 : index === 9 ? 120 : 100
-                                        height: 30
+                                        height: 48
                                         border.color: "#ccc"
                                         color: "transparent"
                                         Text {
@@ -806,6 +818,9 @@ Page {
                                             text: modelData
                                             font.pixelSize: 13
                                             font.bold: true
+                                            horizontalAlignment: Text.AlignHCenter
+                                            verticalAlignment: Text.AlignVCenter
+                                            wrapMode: Text.WordWrap
                                         }
                                     }
                                 }
@@ -1453,6 +1468,15 @@ Page {
             property int selectedSpecRow: -1   // РЎРѓР Р†Р С•РЎвЂ РЎРѓР Р†Р С•Р в„–РЎРѓРЎвЂљР Р†Р С• Р Т‘Р В»РЎРЏ Р С•РЎвЂљРЎРѓР В»Р ВµР В¶Р С‘Р Р†Р В°Р Р…Р С‘РЎРЏ РЎРѓРЎвЂљРЎР‚Р С•Р С”Р С‘ Р Р† РЎРѓР С—Р ВµРЎвЂ Р С‘РЎвЂћР С‘Р С”Р В°РЎвЂ Р С‘Р С‘
             property var allMaterialsForSpec: []
 
+            function specColumnWidth(column) {
+                if (column === 0) return 70
+                if (column === 1) return 380
+                if (column === 2) return 120
+                if (column === 3) return 150
+                if (column === 4) return 150
+                return 120
+            }
+
             function refreshMachineSpec() {
                 specModel.refresh()
                 machineModel.refresh()
@@ -1633,14 +1657,16 @@ Page {
                         height: 30
                         color: "#e8e8e8"
                         visible: tab3Root.selectedMachineId > 0
-                        RowLayout {
-                            anchors.fill: parent
+                        clip: true
+                        Row {
+                            x: -specTable.contentX
+                            height: parent.height
                             spacing: 0
                             Repeater {
                                 model: ["#", "Материал", "Кол-во", "Цена/ед.", "Сумма"]
                                 Rectangle {
-                                    width: index === 0 ? 50 : index === 1 ? 250 : index === 2 ? 80 : index === 3 ? 100 : 100
-                                    height: 30
+                                    width: tab3Root.specColumnWidth(index)
+                                    height: parent.height
                                     border.color: "#ccc"
                                     color: "transparent"
                                     Text {
@@ -1662,11 +1688,7 @@ Page {
                         clip: true
                         visible: tab3Root.selectedMachineId > 0
                         columnWidthProvider: function(column) {
-                            if (column === 0) return 50
-                            if (column === 1) return 250
-                            if (column === 2) return 80
-                            if (column === 3) return 100
-                            return 100
+                            return tab3Root.specColumnWidth(column)
                         }
 
                         delegate: Rectangle {

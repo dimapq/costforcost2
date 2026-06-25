@@ -59,7 +59,7 @@ password = CostClientApp_2026!
 Если нужно проверить вручную с клиентского компьютера:
 
 ```bash
-psql -h 100.86.4.84 -p 5432 -U cost_client_app -d cost_online_demo
+psql -h 100.86.4.84 -p 5432 -U cost_client_app -d cost
 ```
 
 Если вход открылся, значит сетевая часть настроена правильно.

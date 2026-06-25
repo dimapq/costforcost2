@@ -19,18 +19,23 @@ Page {
         return 80
     }
 
-    SplitView {
+    RowLayout {
         anchors.fill: parent
-        orientation: Qt.Horizontal
+        anchors.margins: 12
+        spacing: 16
 
         // ========== ЛЕВАЯ ПАНЕЛЬ: СПИСОК СОТРУДНИКОВ ==========
-        Item {
-            SplitView.preferredWidth: 500
-            SplitView.minimumWidth: 350
+        Rectangle {
+            Layout.preferredWidth: 760
+            Layout.minimumWidth: 520
+            Layout.fillHeight: true
+            Layout.fillWidth: true
+            color: "transparent"
+            clip: true
 
             ColumnLayout {
                 anchors.fill: parent
-                anchors.margins: 15
+                anchors.margins: 10
                 spacing: 10
 
                 // Заголовок и кнопки управления
@@ -198,17 +203,21 @@ Page {
         }
 
         // ========== ПРАВАЯ ПАНЕЛЬ: ИСТОРИЯ ДЕЙСТВИЙ ==========
-        Item {
+        Rectangle {
             id: workHistoryPane
-            SplitView.fillWidth: true
-            SplitView.minimumWidth: 400
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            Layout.minimumWidth: 560
+            Layout.preferredWidth: 920
+            color: "transparent"
+            clip: true
 
             property int selectedWorkLogId: -1
             property int selectedHistoryRow: -1
 
             ColumnLayout {
                 anchors.fill: parent
-                anchors.margins: 15
+                anchors.margins: 10
                 spacing: 10
 
                 // Заголовок истории

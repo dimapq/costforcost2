@@ -1,5 +1,5 @@
 APP_NAME = "MachineCost Pro"
-APP_VERSION = "1.6"
+APP_VERSION = "1.7"
 APP_VERSION_LABEL = f"v{APP_VERSION}"
 APP_EXE_NAME = "MachineCostPro.exe"
 UPDATER_EXE_NAME = "MachineCostProUpdater.exe"

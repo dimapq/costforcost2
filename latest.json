@@ -1,6 +1,6 @@
 {
-  "version": "1.6",
+  "version": "1.7",
   "url": "https://github.com/dimapq/costforcost2/releases/latest/download/MachineCostPro.zip",
-  "notes": "Release v1.6. Includes online-only connection flow, expanded settings, full autotest suite with FIFO/cost/inventory/transactions/indirect costs/reports/export checks, and randomized formula validation in autotests.",
-  "sha256": "706775F3FBAC2BBAA0229D434CB5444E7773DC83C180FF2CDEB159329EC22DA1"
+  "notes": "Release v1.7. Includes online-only connection flow, settings-based autotests, database name defaults switched to cost, and current UI/layout fixes.",
+  "sha256": "D6C9987518D691332BC47102D9CACE5DB5E6B4353FFA85830DE4024C1605DEF6"
 }

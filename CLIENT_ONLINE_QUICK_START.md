@@ -33,7 +33,7 @@ Connected
 ```ini
 host = 100.86.4.84
 port = 5432
-name = cost_online_demo
+name = cost
 user = cost_client_app
 password = CostClientApp_2026!
 sslmode = disable

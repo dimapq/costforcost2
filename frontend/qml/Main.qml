@@ -290,7 +290,7 @@ ApplicationWindow {
                 TextField { id: dbPortField; Layout.fillWidth: true; placeholderText: "5432"; validator: IntValidator { bottom: 1; top: 65535 } }
 
                 Label { text: "База данных:" }
-                TextField { id: dbNameField; Layout.fillWidth: true; placeholderText: "cost_online_demo" }
+                TextField { id: dbNameField; Layout.fillWidth: true; placeholderText: "cost" }
 
                 Label { text: "Пользователь:" }
                 TextField { id: dbUserField; Layout.fillWidth: true; placeholderText: "cost_client_app" }
@@ -1066,7 +1066,7 @@ ApplicationWindow {
         updateConnectionModeTexts()
         dbHostField.text = cfg.host || "localhost"
         dbPortField.text = cfg.port || "5432"
-        dbNameField.text = cfg.name || "cost_online_demo"
+        dbNameField.text = cfg.name || "cost"
         dbUserField.text = cfg.user || "cost_client_app"
         dbPasswordField.text = cfg.password || ""
         configPathLabel.text = "Файл настроек: " + (cfg.config_path || "config.ini")

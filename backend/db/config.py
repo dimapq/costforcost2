@@ -9,7 +9,7 @@ PROFILE_SECTION_BY_MODE = {
 DEFAULT_MODE = "online"
 ACTIVE_SECTION = "database"
 APP_SECTION = "app"
-DEFAULT_ONLINE_NAME = "cost_online_demo"
+DEFAULT_ONLINE_NAME = "cost"
 DEFAULT_ONLINE_USER = "cost_client_app"
 DEFAULT_ONLINE_PASSWORD = "CostClientApp_2026!"
 

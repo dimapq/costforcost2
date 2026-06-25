@@ -48,7 +48,7 @@ host    all    all    100.64.0.0/10    scram-sha-256
 [database_online]
 host = 100.86.4.84
 port = 5432
-name = cost_online_demo
+name = cost
 user = cost_client_app
 password = CostClientApp_2026!
 sslmode = disable
