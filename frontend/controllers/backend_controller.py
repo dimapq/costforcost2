@@ -4,12 +4,13 @@ import configparser
 import ipaddress
 import os
 import random
+import socket
 import shutil
 import subprocess
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from PySide6.QtCore import QObject, Slot
+from PySide6.QtCore import QObject, Signal, Slot
 from decimal import Decimal
 from psycopg2 import sql
 
@@ -20,15 +21,22 @@ from backend.models.production import get_finished_goods_summary
 from backend.models.analytics import get_recent_transactions
 from backend.models.machine import list_machines, calculate_machine_cost_from_purchases, fetch_machines_with_calculated_costs, normalize_null_purchase_prices
 from backend.db.connection import get_connection
+from version import APP_VERSION
 
 
 class BackendController(QObject):
+    operationsLogChanged = Signal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
         try:
             self._reconcile_purchase_quantities_to_inventory()
         except Exception as e:
             print(f"Ошибка служебной синхронизации остатков: {e}")
+        try:
+            self._upsert_client_heartbeat()
+        except Exception as e:
+            print(f"Ошибка первичной регистрации клиента: {e}")
 
     def _ensure_id_sequence(self, cur, table_name):
         sequence_name = f"{table_name}_id_seq"
@@ -1105,11 +1113,158 @@ class BackendController(QObject):
                         details TEXT
                     )
                 """)
+                cur.execute("ALTER TABLE IF EXISTS app_operations_log ADD COLUMN IF NOT EXISTS actor_ip VARCHAR(64)")
+                cur.execute("ALTER TABLE IF EXISTS app_operations_log ADD COLUMN IF NOT EXISTS actor_name VARCHAR(255)")
+                cur.execute("ALTER TABLE IF EXISTS app_operations_log ADD COLUMN IF NOT EXISTS actor_machine_name VARCHAR(255)")
                 cur.execute("""
                     CREATE INDEX IF NOT EXISTS idx_app_operations_log_created_at
                     ON app_operations_log (created_at DESC)
                 """)
             conn.commit()
+
+    def _ensure_tailscale_clients_schema(self):
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS tailscale_clients (
+                        ip VARCHAR(64) PRIMARY KEY,
+                        display_name VARCHAR(255),
+                        machine_name VARCHAR(255),
+                        app_name VARCHAR(255),
+                        app_version VARCHAR(64),
+                        last_seen TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                cur.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_tailscale_clients_last_seen
+                    ON tailscale_clients (last_seen DESC)
+                """)
+            conn.commit()
+
+    def _get_local_tailscale_ip(self):
+        candidates = []
+        try:
+            output = subprocess.run(
+                ["ipconfig"],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=10
+            ).stdout
+            in_tailscale_block = False
+            for raw_line in output.splitlines():
+                line = raw_line.strip()
+                if not line:
+                    in_tailscale_block = False
+                    continue
+                if "tailscale" in line.lower():
+                    in_tailscale_block = True
+                    continue
+                if in_tailscale_block and ("IPv4" in line or "IPv4-адрес" in line):
+                    parts = line.split(":")
+                    if len(parts) >= 2:
+                        ip = parts[-1].strip()
+                        try:
+                            ip_obj = ipaddress.ip_address(ip)
+                            if ip_obj.version == 4:
+                                return ip
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+
+        try:
+            for _, _, _, _, sockaddr in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+                ip = sockaddr[0]
+                if ip.startswith("100.") or ip.startswith("fd7a:"):
+                    return ip
+                candidates.append(ip)
+        except Exception:
+            pass
+
+        for ip in candidates:
+            if ip.startswith("100."):
+                return ip
+        return ""
+
+    def _ping_host(self, ip_address_text):
+        clean_ip = (ip_address_text or "").strip()
+        if not clean_ip:
+            return False
+        try:
+            result = subprocess.run(
+                ["ping", "-n", "1", "-w", "700", clean_ip],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=5
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
+
+    def _upsert_client_heartbeat(self):
+        self._ensure_tailscale_clients_schema()
+        ip = self._get_local_tailscale_ip()
+        if not ip:
+            return {"ok": False, "message": "Tailscale IP не найден.", "ip": ""}
+        machine_name = socket.gethostname()
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO tailscale_clients (ip, display_name, machine_name, app_name, app_version, last_seen)
+                    VALUES (%s, NULL, %s, %s, %s, CURRENT_TIMESTAMP)
+                    ON CONFLICT (ip) DO UPDATE
+                    SET machine_name = EXCLUDED.machine_name,
+                        app_name = EXCLUDED.app_name,
+                        app_version = EXCLUDED.app_version,
+                        last_seen = CURRENT_TIMESTAMP
+                """, (
+                    ip,
+                    machine_name,
+                    "MachineCost Pro",
+                    APP_VERSION
+                ))
+            conn.commit()
+        return {"ok": True, "message": "Heartbeat обновлён.", "ip": ip}
+
+    def _get_current_actor_info(self):
+        self._ensure_tailscale_clients_schema()
+        ip = self._get_local_tailscale_ip()
+        machine_name = socket.gethostname()
+        actor_name = machine_name
+        if not ip:
+            return {
+                "ip": "",
+                "name": actor_name,
+                "machine_name": machine_name,
+            }
+        try:
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT COALESCE(display_name, ''), COALESCE(machine_name, '')
+                        FROM tailscale_clients
+                        WHERE ip = %s
+                    """, (ip,))
+                    row = cur.fetchone()
+            if row:
+                display_name = (row[0] or "").strip()
+                saved_machine_name = (row[1] or "").strip()
+                machine_name = saved_machine_name or machine_name
+                actor_name = display_name or machine_name or ip
+            else:
+                actor_name = machine_name or ip
+        except Exception:
+            actor_name = machine_name or ip
+        return {
+            "ip": ip,
+            "name": actor_name,
+            "machine_name": machine_name,
+        }
 
     def _ensure_plate_cutting_schema(self):
         plate_types = [
@@ -1256,19 +1411,27 @@ class BackendController(QObject):
     def _log_operation(self, operation_type, description, amount=None, details=None, operation_dt=None):
         try:
             self._ensure_operations_log_schema()
+            actor = self._get_current_actor_info()
             with get_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute("""
-                        INSERT INTO app_operations_log (created_at, operation_type, description, amount, details)
-                        VALUES (COALESCE(%s, CURRENT_TIMESTAMP), %s, %s, %s, %s)
+                        INSERT INTO app_operations_log (
+                            created_at, operation_type, description, amount, details,
+                            actor_ip, actor_name, actor_machine_name
+                        )
+                        VALUES (COALESCE(%s, CURRENT_TIMESTAMP), %s, %s, %s, %s, %s, %s, %s)
                     """, (
                         operation_dt,
                         (operation_type or "").strip() or "Операция",
                         (description or "").strip() or "Действие в программе",
                         Decimal(str(amount)).quantize(Decimal("0.01")) if amount not in (None, "") else None,
-                        details.strip() if isinstance(details, str) and details.strip() else None
+                        details.strip() if isinstance(details, str) and details.strip() else None,
+                        actor.get("ip") or None,
+                        actor.get("name") or None,
+                        actor.get("machine_name") or None,
                     ))
                 conn.commit()
+            self.operationsLogChanged.emit()
         except Exception as e:
             print(f"Ошибка записи операции: {e}")
 
@@ -1277,7 +1440,10 @@ class BackendController(QObject):
         with get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("""
-                    SELECT created_at, operation_type, description, amount
+                    SELECT created_at, operation_type, description, amount,
+                           COALESCE(actor_name, ''),
+                           COALESCE(actor_ip, ''),
+                           COALESCE(actor_machine_name, '')
                     FROM app_operations_log
                     ORDER BY created_at DESC, id DESC
                     LIMIT %s
@@ -1288,10 +1454,94 @@ class BackendController(QObject):
                 "date": row[0],
                 "type": row[1] or "",
                 "description": row[2] or "",
-                "amount": row[3]
+                "amount": row[3],
+                "actor_name": row[4] or "",
+                "actor_ip": row[5] or "",
+                "actor_machine_name": row[6] or "",
             }
             for row in rows
         ]
+
+    @Slot(result="QVariantMap")
+    def touchClientHeartbeat(self):
+        try:
+            return self._upsert_client_heartbeat()
+        except Exception as e:
+            print(f"Ошибка heartbeat клиента: {e}")
+            return {"ok": False, "message": f"Ошибка heartbeat: {e}", "ip": ""}
+
+    @Slot(result="QVariantList")
+    def getTailscaleClients(self):
+        try:
+            self._ensure_tailscale_clients_schema()
+            heartbeat = self._upsert_client_heartbeat()
+            local_ip = heartbeat.get("ip") or self._get_local_tailscale_ip()
+            now = datetime.now()
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT
+                            ip,
+                            COALESCE(display_name, ''),
+                            COALESCE(machine_name, ''),
+                            COALESCE(app_name, ''),
+                            COALESCE(app_version, ''),
+                            last_seen
+                        FROM tailscale_clients
+                        ORDER BY COALESCE(display_name, ''), machine_name, ip
+                    """)
+                    rows = cur.fetchall()
+
+            result = []
+            for ip, display_name, machine_name, app_name, app_version, last_seen in rows:
+                is_online = True if ip == local_ip else self._ping_host(ip)
+                seconds_since_seen = (now - last_seen).total_seconds() if last_seen else 10 ** 9
+                app_active = seconds_since_seen <= 90
+                if app_active:
+                    status = "green"
+                    status_text = "Подключен к БД"
+                elif is_online:
+                    status = "yellow"
+                    status_text = "В сети, но приложение не активно"
+                else:
+                    status = "red"
+                    status_text = "Не в сети"
+                result.append({
+                    "ip": ip or "",
+                    "display_name": display_name or "",
+                    "machine_name": machine_name or "",
+                    "app_name": app_name or "",
+                    "app_version": app_version or "",
+                    "last_seen": last_seen.strftime("%d.%m.%Y %H:%M:%S") if last_seen else "",
+                    "status": status,
+                    "status_text": status_text,
+                    "is_local": ip == local_ip
+                })
+            return result
+        except Exception as e:
+            print(f"Ошибка получения списка Tailscale-клиентов: {e}")
+            return []
+
+    @Slot(str, str, result="QVariantMap")
+    def updateTailscaleClientName(self, ip, display_name):
+        try:
+            self._ensure_tailscale_clients_schema()
+            clean_ip = (ip or "").strip()
+            clean_name = (display_name or "").strip()
+            if not clean_ip:
+                return {"ok": False, "message": "IP не указан."}
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        UPDATE tailscale_clients
+                        SET display_name = %s
+                        WHERE ip = %s
+                    """, (clean_name or None, clean_ip))
+                conn.commit()
+            return {"ok": True, "message": "Имя клиента сохранено."}
+        except Exception as e:
+            print(f"Ошибка сохранения имени Tailscale-клиента: {e}")
+            return {"ok": False, "message": f"Ошибка сохранения имени: {e}"}
 
     @Slot(result="QVariantMap")
     def exportFullDatabaseToExcel(self):
@@ -1330,6 +1580,11 @@ class BackendController(QObject):
                                 max_length = max(max_length, len(value))
                             worksheet.column_dimensions[column_letter].width = min(max(max_length + 2, 12), 45)
 
+            self._log_operation(
+                "Экспорт",
+                "Выполнена выгрузка всей базы в Excel",
+                details=str(filepath)
+            )
             return {
                 "ok": True,
                 "message": f"Выгрузка базы в Excel завершена: {filepath}",
@@ -1393,6 +1648,11 @@ class BackendController(QObject):
                     "path": ""
                 }
 
+            self._log_operation(
+                "Экспорт",
+                "Создан SQL-дамп базы данных",
+                details=str(filepath)
+            )
             return {
                 "ok": True,
                 "message": f"Дамп базы создан: {filepath}",
@@ -1501,6 +1761,11 @@ class BackendController(QObject):
             self._ensure_indirect_schema()
             self._ensure_operations_log_schema()
             self._ensure_plate_cutting_schema()
+            self._log_operation(
+                "Импорт",
+                "Импортирован SQL-дамп базы данных",
+                details=str(source_path)
+            )
             return {
                 "ok": True,
                 "message": normalized_dump_path
@@ -1542,6 +1807,11 @@ class BackendController(QObject):
             self._ensure_indirect_schema()
             self._ensure_operations_log_schema()
             self._ensure_plate_cutting_schema()
+            self._log_operation(
+                "Система",
+                "Удалены все данные из базы",
+                details="TRUNCATE всех таблиц с сохранением структуры"
+            )
             return {
                 "ok": True,
                 "message": "\u0412\u0441\u0435 \u0437\u0430\u043f\u0438\u0441\u0438 \u0432 \u0431\u0430\u0437\u0435 \u0443\u0434\u0430\u043b\u0435\u043d\u044b. \u0421\u0442\u0440\u0443\u043a\u0442\u0443\u0440\u0430 \u0442\u0430\u0431\u043b\u0438\u0446 \u0441\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0430.",
@@ -2186,6 +2456,12 @@ class BackendController(QObject):
                         Decimal(str(amount or 0))
                     ))
                 conn.commit()
+            self._log_operation(
+                "Сотрудники",
+                f"Добавлена запись взаиморасчёта: {clean_title}",
+                amount=amount,
+                details=f"Сотрудник ID {employee_id}, тип: {clean_type}, дата: {settlement_date}"
+            )
             return {"ok": True, "message": "Запись добавлена."}
         except Exception as e:
             print(f"Ошибка добавления взаиморасчёта сотрудника: {e}")
@@ -2197,8 +2473,18 @@ class BackendController(QObject):
             self._ensure_employee_settlement_schema()
             with get_connection() as conn:
                 with conn.cursor() as cur:
+                    cur.execute("SELECT employee_id, settlement_type, title, amount FROM employee_settlements WHERE id = %s", (settlement_id,))
+                    row = cur.fetchone()
+                    if not row:
+                        return {"ok": False, "message": "Запись не найдена."}
                     cur.execute("DELETE FROM employee_settlements WHERE id = %s", (settlement_id,))
                 conn.commit()
+            self._log_operation(
+                "Сотрудники",
+                f"Удалена запись взаиморасчёта: {row[2] or '-'}",
+                amount=row[3],
+                details=f"Сотрудник ID {row[0]}, тип: {row[1]}, ID записи: {settlement_id}"
+            )
             return {"ok": True, "message": "Запись удалена."}
         except Exception as e:
             print(f"Ошибка удаления взаиморасчёта сотрудника: {e}")
@@ -2523,15 +2809,17 @@ class BackendController(QObject):
     def getRecentTransactions(self, limit):
         try:
             transactions = self._get_recent_operations(limit)
-            if not transactions:
-                transactions = get_recent_transactions(limit)
             result = []
             for t in transactions:
+                actor_name = t.get('actor_name', '') or t.get('actor_machine_name', '') or "Неизвестно"
+                actor_ip = t.get('actor_ip', '')
+                actor_display = f"{actor_name} ({actor_ip})" if actor_ip else actor_name
                 result.append({
                     "date": t['date'].strftime("%d.%m.%Y %H:%M") if t.get('date') else "",
                     "type": t.get('type', ''),
                     "description": t.get('description', ''),
-                    "amount": f"{t.get('amount', 0):.2f} RUB" if t.get('amount') not in (None, "") else ""
+                    "amount": f"{t.get('amount', 0):.2f} RUB" if t.get('amount') not in (None, "") else "",
+                    "actor": actor_display
                 })
             return result
         except Exception as e:
@@ -2747,7 +3035,14 @@ class BackendController(QObject):
                     row = cur.fetchone()
             if not row:
                 return {"ok": False, "message": "Template not found."}
-            return self._export_plate_template_file(row[0], row[1], row[2], target_path)
+            result = self._export_plate_template_file(row[0], row[1], row[2], target_path)
+            if result.get("ok"):
+                self._log_operation(
+                    "Экспорт",
+                    f"Выгружен чертёж шаблона детали #{template_id}",
+                    details=result.get("path") or target_path
+                )
+            return result
         except Exception as e:
             return {"ok": False, "message": f"Error exporting drawing file: {e}"}
 
@@ -2765,7 +3060,14 @@ class BackendController(QObject):
                     row = cur.fetchone()
             if not row:
                 return {"ok": False, "message": "Template not found."}
-            return self._export_plate_template_file(row[0], row[1], row[2], target_path)
+            result = self._export_plate_template_file(row[0], row[1], row[2], target_path)
+            if result.get("ok"):
+                self._log_operation(
+                    "Экспорт",
+                    f"Выгружен файл обработки шаблона детали #{template_id}",
+                    details=result.get("path") or target_path
+                )
+            return result
         except Exception as e:
             return {"ok": False, "message": f"Error exporting process file: {e}"}
 
@@ -3072,6 +3374,11 @@ class BackendController(QObject):
         try:
             from backend.models.scraper import quick_add_product
             quick_add_product(url, notes=url)
+            self._log_operation(
+                "Материалы",
+                "Добавлен материал через парсинг ссылки",
+                details=url
+            )
             return True
         except Exception as e:
             print(f"Ошибка парсинга: {e}")
@@ -4232,7 +4539,10 @@ class BackendController(QObject):
     def addMachineModel(self, model):
         try:
             from backend.models.machine import add_new_machine_gui
-            return add_new_machine_gui(model)
+            ok = add_new_machine_gui(model)
+            if ok:
+                self._log_operation("Станки", f"Добавлена модель станка: {model}")
+            return ok
         except Exception as e:
             print(f"Ошибка добавления модели: {e}")
             return False
@@ -4241,7 +4551,15 @@ class BackendController(QObject):
     def addMaterialToMachine(self, machine_id, material_id, quantity):
         try:
             from backend.models.machine import add_material_to_machine_gui
-            return add_material_to_machine_gui(machine_id, material_id, Decimal(str(quantity)))
+            ok = add_material_to_machine_gui(machine_id, material_id, Decimal(str(quantity)))
+            if ok:
+                self._log_operation(
+                    "Станки",
+                    f"Добавлен материал в модель станка ID {machine_id}",
+                    amount=quantity,
+                    details=f"Материал ID {material_id}"
+                )
+            return ok
         except Exception as e:
             print(f"Ошибка добавления материала: {e}")
             return False
@@ -4250,7 +4568,14 @@ class BackendController(QObject):
     def removeMaterialFromMachine(self, machine_id, material_id):
         try:
             from backend.models.machine import remove_material_from_machine_gui
-            return remove_material_from_machine_gui(machine_id, material_id)
+            ok = remove_material_from_machine_gui(machine_id, material_id)
+            if ok:
+                self._log_operation(
+                    "Станки",
+                    f"Удалён материал из модели станка ID {machine_id}",
+                    details=f"Материал ID {material_id}"
+                )
+            return ok
         except Exception as e:
             print(f"Ошибка удаления материала: {e}")
             return False
@@ -4259,7 +4584,15 @@ class BackendController(QObject):
     def updateMaterialInMachine(self, machine_id, material_id, quantity):
         try:
             from backend.models.machine import edit_material_quantity_in_machine_gui
-            return edit_material_quantity_in_machine_gui(machine_id, material_id, Decimal(str(quantity)))
+            ok = edit_material_quantity_in_machine_gui(machine_id, material_id, Decimal(str(quantity)))
+            if ok:
+                self._log_operation(
+                    "Станки",
+                    f"Изменено количество материала в модели станка ID {machine_id}",
+                    amount=quantity,
+                    details=f"Материал ID {material_id}"
+                )
+            return ok
         except Exception as e:
             print(f"Ошибка изменения количества: {e}")
             return False
@@ -4269,6 +4602,9 @@ class BackendController(QObject):
         try:
             with get_connection() as conn:
                 with conn.cursor() as cur:
+                    cur.execute("SELECT model FROM machines WHERE id = %s", (machine_id,))
+                    model_row = cur.fetchone()
+                    model_name = model_row[0] if model_row else f"ID {machine_id}"
                     # Проверяем что нет станков в производстве с этой моделью
                     cur.execute("""
                         SELECT COUNT(*) FROM finished_goods 
@@ -4282,6 +4618,7 @@ class BackendController(QObject):
                 # Удаляем модель (каскадно удалятся machine_materials, machine_tools, machine_labor_costs)
                     cur.execute("DELETE FROM machines WHERE id = %s", (machine_id,))
                     conn.commit()
+            self._log_operation("Станки", f"Удалена модель станка: {model_name}")
             return True
         except Exception as e:
             print(f"Ошибка удаления модели: {e}")
@@ -4592,6 +4929,12 @@ class BackendController(QObject):
                             f"Уплата налога за период {period_start} - {period_end}"
                         ))
                 conn.commit()
+            self._log_operation(
+                "Налоги",
+                f"Сохранена оплата налога за период {period_start} - {period_end}",
+                amount=amount,
+                details=f"Ставка: {rate}%, база: {tax_base}"
+            )
             return {
                 "ok": True,
                 "message": f"Оплата налога сохранена: {amount:.2f} руб.",
@@ -5182,12 +5525,13 @@ class BackendController(QObject):
                 with conn.cursor() as cur:
                     # Проверяем что станок действительно продан
                     cur.execute("""
-                        SELECT status FROM finished_goods WHERE id = %s
+                        SELECT status, machine_model FROM finished_goods WHERE id = %s
                     """, (finished_good_id,))
                     row = cur.fetchone()
                     if not row or row[0] != 'sold':
                         print("Станок не найден или не продан")
                         return False
+                    machine_model = row[1] or f"ID {finished_good_id}"
 
                     # Удаляем запись о продаже
                     cur.execute("""
@@ -5211,6 +5555,11 @@ class BackendController(QObject):
 
                     conn.commit()
                     print(f"Станок ID {finished_good_id} возвращён на склад")
+            self._log_operation(
+                "Станки",
+                f"Проданный станок возвращён на склад: {machine_model}",
+                details=f"ID станка: {finished_good_id}"
+            )
             return True
         except Exception as e:
             print(f"Ошибка возврата на склад: {e}")
@@ -5333,9 +5682,15 @@ class BackendController(QObject):
                     
                     # Удаляем саму запись
                     cur.execute("DELETE FROM work_logs WHERE id = %s", (work_log_id,))
-                    
+
                     conn.commit()
                     print(f"Запись о работе ID {work_log_id} отменена, себестоимость уменьшена на {cost_to_subtract:.2f}")
+            self._log_operation(
+                "Операции",
+                f"Отменена запись о работе ID {work_log_id}",
+                amount=cost_to_subtract,
+                details=f"Станок ID {finished_good_id or '-'}, часов: {hours}"
+            )
             return True
         except Exception as e:
             print(f"Ошибка отмены записи: {e}")
@@ -5767,7 +6122,14 @@ class BackendController(QObject):
                             notes,
                             f"{machine_model} (ID {finished_good_id})"
                         ])
-            return self._write_purchase_materials_excel(rows, f"materials_to_buy_machine_{finished_good_id}")
+            filepath = self._write_purchase_materials_excel(rows, f"materials_to_buy_machine_{finished_good_id}")
+            if filepath:
+                self._log_operation(
+                    "Экспорт",
+                    f"Выгружен список закупки для станка ID {finished_good_id}",
+                    details=filepath
+                )
+            return filepath
         except Exception as e:
             print(f"Ошибка выгрузки материалов для выбранного станка: {e}")
             import traceback
@@ -5838,7 +6200,14 @@ class BackendController(QObject):
                             notes,
                             machines
                         ])
-            return self._write_purchase_materials_excel(rows, "materials_to_buy_all_in_progress")
+            filepath = self._write_purchase_materials_excel(rows, "materials_to_buy_all_in_progress")
+            if filepath:
+                self._log_operation(
+                    "Экспорт",
+                    "Выгружен общий список закупки для всех станков в производстве",
+                    details=filepath
+                )
+            return filepath
         except Exception as e:
             print(f"Ошибка выгрузки материалов для всех станков в процессе: {e}")
             import traceback
@@ -5923,7 +6292,7 @@ class BackendController(QObject):
                 with conn.cursor() as cur:
                     # Получаем machine_id
                     cur.execute("""
-                        SELECT machine_id FROM finished_goods WHERE id = %s AND status = 'completed'
+                        SELECT machine_id, machine_model FROM finished_goods WHERE id = %s AND status = 'completed'
                     """, (finished_good_id,))
                     row = cur.fetchone()
                     if not row:
@@ -5931,6 +6300,7 @@ class BackendController(QObject):
                         return False
                     
                     machine_id = row[0]
+                    machine_model = row[1] or f"ID {finished_good_id}"
                     
                     # Получаем материалы из спецификации
                     cur.execute("""
@@ -5967,6 +6337,11 @@ class BackendController(QObject):
                     conn.commit()
                     print(f"Станок ID {finished_good_id} разобран, материалы возвращены на склад")
                     
+            self._log_operation(
+                "Станки",
+                f"Разобран станок: {machine_model}",
+                details=f"ID станка: {finished_good_id}, модель ID: {machine_id}"
+            )
             return True
         except Exception as e:
             print(f"Ошибка разборки станка: {e}")
@@ -5982,12 +6357,13 @@ class BackendController(QObject):
                 with conn.cursor() as cur:
                     # Проверяем что станок на складе
                     cur.execute("""
-                        SELECT status FROM finished_goods WHERE id = %s
+                        SELECT status, machine_model FROM finished_goods WHERE id = %s
                     """, (finished_good_id,))
                     row = cur.fetchone()
                     if not row:
                         print("Станок не найден")
                         return False
+                    machine_model = row[1] or f"ID {finished_good_id}"
                     
                     if row[0] == 'sold':
                         print("Нельзя удалить проданный станок")
@@ -6006,6 +6382,11 @@ class BackendController(QObject):
                     conn.commit()
                     print(f"Станок ID {finished_good_id} удалён")
                     
+            self._log_operation(
+                "Станки",
+                f"Удалён станок: {machine_model}",
+                details=f"ID станка: {finished_good_id}"
+            )
             return True
         except Exception as e:
             print(f"Ошибка удаления станка: {e}")
@@ -6043,6 +6424,12 @@ class BackendController(QObject):
                         finished_good_id
                     ))
                     conn.commit()
+            self._log_operation(
+                "Станки",
+                f"Обновлён готовый станок: {machine_model or '-'}",
+                amount=cost_price,
+                details=f"ID станка: {finished_good_id}, косвенные: {indirect_cost}"
+            )
             return True
         except Exception as e:
             print(f"Ошибка обновления готового станка: {e}")
@@ -6083,6 +6470,11 @@ class BackendController(QObject):
                         WHERE s.finished_good_id = %s
                     """, (sale_date, finished_good_id))
                     conn.commit()
+            self._log_operation(
+                "Продажи",
+                f"Обновлён проданный станок ID {finished_good_id}",
+                details=f"Покупатель: {buyer or '-'}, дата продажи: {sale_date or '-'}, косвенные: {indirect_cost}"
+            )
             return True
         except Exception as e:
             print(f"Error updating sold machine: {e}")
@@ -6427,5 +6819,10 @@ class BackendController(QObject):
                     df_sales.to_excel(writer, sheet_name="Продажи", index=False)
                     df_production.to_excel(writer, sheet_name="Производство", index=False)
             print(f"Отчёт сохранён в {filename}")
+            self._log_operation(
+                "Экспорт",
+                f"Экспортирован отчёт в Excel за период {start} - {end}",
+                details=filename
+            )
         except Exception as e:
             print(f"Ошибка экспорта: {e}")

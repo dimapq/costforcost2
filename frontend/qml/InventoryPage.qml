@@ -73,6 +73,7 @@ Page {
                         id: materialSearchField
                         Layout.fillWidth: true
                         placeholderText: "Поиск по названию..."
+                        onTextChanged: materialModel.setFilter(text)
                     }
                     ComboBox {
                         id: materialCategoryFilter
@@ -942,8 +943,8 @@ Page {
                 id: addCompositeRecipeDialog
                 title: "Новый составной материал"
                 standardButtons: Dialog.Ok | Dialog.Cancel
-                width: 640
-                height: 760
+                width: 512
+                height: 608
                 modal: true
                 focus: true
 

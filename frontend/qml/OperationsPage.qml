@@ -6,6 +6,28 @@ Page {
     title: "Быстрые операции"
 
     property string successBannerText: ""
+    property var tailscaleClients: []
+    property string editingClientIp: ""
+    property string editingClientName: ""
+
+    function refreshOperationsDashboard() {
+        if (!backend) {
+            return
+        }
+        materialsValue.text = backend.getMaterialsSummary()
+        toolsValue.text = backend.getToolsSummary()
+        finishedValue.text = backend.getFinishedGoodsSummary()
+        transactionList.model = backend.getRecentTransactions(50)
+    }
+
+    function refreshTailscaleClients() {
+        if (!backend) {
+            tailscaleClients = []
+            return
+        }
+        backend.touchClientHeartbeat()
+        tailscaleClients = backend.getTailscaleClients()
+    }
 
     function formatHoursAndMinutes(hoursValue) {
         var totalMinutes = Math.round(Number(hoursValue) * 60)
@@ -14,10 +36,109 @@ Page {
         return hours + " ч " + minutes + " мин"
     }
 
+    Connections {
+        target: backend
+
+        function onOperationsLogChanged() {
+            refreshOperationsDashboard()
+        }
+    }
+
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: 20
         spacing: 20
+
+        GroupBox {
+            Layout.fillWidth: true
+            title: "Клиенты Tailscale"
+
+            ColumnLayout {
+                anchors.fill: parent
+                spacing: 8
+
+                RowLayout {
+                    Layout.fillWidth: true
+
+                    Label {
+                        text: "Зелёный: подключен к БД. Жёлтый: в сети, но приложение не активно. Красный: не в сети."
+                        color: "#666"
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
+
+                    Button {
+                        text: "Обновить"
+                        onClicked: refreshTailscaleClients()
+                    }
+                }
+
+                ListView {
+                    id: tailscaleClientsList
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 150
+                    clip: true
+                    model: tailscaleClients
+
+                    delegate: Rectangle {
+                        width: ListView.view ? ListView.view.width : parent.width
+                        height: 42
+                        color: index % 2 ? "#fafafa" : "white"
+                        border.color: "#e5e5e5"
+
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.margins: 6
+                            spacing: 10
+
+                            Rectangle {
+                                width: 14
+                                height: 14
+                                radius: 7
+                                color: modelData.status === "green" ? "#2e9d57" : (modelData.status === "yellow" ? "#d8a106" : "#d9534f")
+                                border.color: "#777"
+                                Layout.alignment: Qt.AlignVCenter
+                            }
+
+                            Label {
+                                text: (modelData.display_name && modelData.display_name.length > 0 ? modelData.display_name : (modelData.machine_name && modelData.machine_name.length > 0 ? modelData.machine_name : modelData.ip))
+                                font.bold: true
+                                Layout.preferredWidth: 180
+                                elide: Text.ElideRight
+                            }
+
+                            Label {
+                                text: modelData.ip
+                                Layout.preferredWidth: 120
+                            }
+
+                            Label {
+                                text: modelData.status_text
+                                color: modelData.status === "green" ? "#2e7d32" : (modelData.status === "yellow" ? "#9a6b00" : "#c62828")
+                                Layout.preferredWidth: 220
+                                elide: Text.ElideRight
+                            }
+
+                            Label {
+                                text: "Последняя активность: " + (modelData.last_seen || "-")
+                                Layout.fillWidth: true
+                                elide: Text.ElideRight
+                            }
+
+                            Button {
+                                text: "Имя"
+                                onClicked: {
+                                    editingClientIp = modelData.ip || ""
+                                    editingClientName = modelData.display_name || ""
+                                    clientNameField.text = editingClientName
+                                    renameClientDialog.open()
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         // ================= Учёт рабочего времени =================
         GroupBox {
@@ -215,10 +336,10 @@ Page {
             ListView {
                 id: transactionList
                 anchors.fill: parent
-                model: backend.getRecentTransactions(50)
+                model: []
                 delegate: Rectangle {
                     width: parent.width
-                    height: 36
+                    height: 48
                     border.color: "#eee"
                     color: index % 2 ? "#fafafa" : "white"
 
@@ -227,7 +348,23 @@ Page {
                         anchors.margins: 5
                         Text { text: modelData.date; Layout.preferredWidth: 100 }
                         Text { text: modelData.type; Layout.preferredWidth: 120; font.bold: true }
-                        Text { text: modelData.description; Layout.fillWidth: true }
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 1
+
+                            Text {
+                                text: modelData.description
+                                Layout.fillWidth: true
+                                elide: Text.ElideRight
+                            }
+                            Text {
+                                text: "Кто: " + (modelData.actor || "Неизвестно")
+                                color: "#666"
+                                font.pixelSize: 11
+                                Layout.fillWidth: true
+                                elide: Text.ElideRight
+                            }
+                        }
                         Text { text: modelData.amount; Layout.preferredWidth: 100; horizontalAlignment: Text.AlignRight }
                     }
                 }
@@ -262,6 +399,33 @@ Page {
         }
     }
 
+    Dialog {
+        id: renameClientDialog
+        title: "Имя клиента"
+        modal: true
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        width: 420
+
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 10
+
+            Label { text: "IP: " + editingClientIp }
+            TextField {
+                id: clientNameField
+                Layout.fillWidth: true
+                placeholderText: "Например: Ноутбук цех"
+            }
+        }
+
+        onAccepted: {
+            var result = backend.updateTailscaleClientName(editingClientIp, clientNameField.text)
+            if (result && result.ok) {
+                refreshTailscaleClients()
+            }
+        }
+    }
+
     Timer {
         id: successBannerTimer
         interval: 2200
@@ -275,13 +439,15 @@ Page {
         repeat: true
         running: true
         onTriggered: {
-            materialsValue.text = backend.getMaterialsSummary();
-            toolsValue.text = backend.getToolsSummary();
-            finishedValue.text = backend.getFinishedGoodsSummary();
-            transactionList.model = backend.getRecentTransactions(50);
+            refreshOperationsDashboard();
+            refreshTailscaleClients();
         }
     }
 
-    Component.onCompleted: summaryTimer.start()
+    Component.onCompleted: {
+        refreshOperationsDashboard()
+        refreshTailscaleClients()
+        summaryTimer.start()
+    }
 }
 

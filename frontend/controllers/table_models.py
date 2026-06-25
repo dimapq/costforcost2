@@ -10,6 +10,7 @@ class MaterialTableModel(QAbstractTableModel):
         self._data = []
         self._category_filter = ""
         self._machine_filter = ""
+        self._search_text = ""
         self._sort_column = 1
         self._sort_ascending = True
         self._extra_headers = ["Используется в", "Откуда взят", "Примечание", "Дата обновления"]
@@ -62,10 +63,31 @@ class MaterialTableModel(QAbstractTableModel):
             return self._headers[section]
         return None
 
+    def _material_row_for_qml(self, row):
+        if not row:
+            return {}
+        result = dict(row)
+        for key in ("quantity", "price", "total", "low_stock_threshold", "enough_stock_threshold"):
+            value = result.get(key)
+            try:
+                result[key] = float(value) if value is not None else 0.0
+            except (TypeError, ValueError):
+                result[key] = 0.0
+        result["id"] = int(result.get("id") or 0)
+        result["name"] = result.get("name") or ""
+        result["category"] = result.get("category") or ""
+        result["unit"] = result.get("unit") or ""
+        result["used_in"] = result.get("used_in") or ""
+        result["source"] = result.get("source") or ""
+        result["notes"] = result.get("notes") or ""
+        result["updated_date"] = result.get("updated_date") or ""
+        result["stock_state"] = result.get("stock_state") or ""
+        return result
+
     @Slot(int, result="QVariantMap")
     def get(self, row):
         if 0 <= row < len(self._data):
-            return self._data[row]
+            return self._material_row_for_qml(self._data[row])
         return {}
 
     @Slot(int, result=str)
@@ -144,6 +166,11 @@ class MaterialTableModel(QAbstractTableModel):
     def setMachineFilter(self, machine_model):
         normalized = (machine_model or "").strip()
         self._machine_filter = "" if normalized in ("", "Все", "Все станки") else normalized
+        self.refresh()
+
+    @Slot(str)
+    def setFilter(self, text):
+        self._search_text = (text or "").strip().lower()
         self.refresh()
 
     @Slot()
@@ -258,6 +285,11 @@ class MaterialTableModel(QAbstractTableModel):
                     data = [
                         row for row in data
                         if self._machine_filter in [item.strip() for item in (row.get('used_in') or '').split(',') if item.strip()]
+                    ]
+                if self._search_text:
+                    data = [
+                        row for row in data
+                        if self._search_text in (row.get('name') or '').lower()
                     ]
                 self._data = data
                 self._apply_sort()
